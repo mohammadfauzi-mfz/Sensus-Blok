@@ -160,7 +160,7 @@ function formHTML(def,d={}){
     const v=d[f.k];let h='';
     if(f.t=='num')h=`<label>${E(f.l)}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0">`;
     else if(f.t=='text')h=`<label>${E(f.l)}</label><input name="${f.k}" value="${E(v??'')}">`;
-    else if(f.t=='bbc')h=`<label>${E(f.l)}</label><input name="${f.k}" value="${E(v??'')}"><label class="opt"><input type="checkbox" name="${f.k}_nf" ${d[f.k+'_nf']?'checked':''}> Tidak ditemukan</label>`;
+    else if(f.t=='bbc')h=`<label>${E(f.l)}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0"><label class="opt"><input type="checkbox" name="${f.k}_nf" ${d[f.k+'_nf']?'checked':''}> Tidak ditemukan</label>`;
     else{
       const os=f.t=='yn'?['Ya','Tidak']:f.o,cv=v??(f.t=='yn'?'Tidak':os[0]);
       h=`<label>${E(f.l)}</label>`+os.map(o=>`<label class="opt"><input type="radio" name="${f.k}" value="${E(o)}" ${o==cv?'checked':''} onchange="vis()"> ${E(o)}</label>`).join('');
@@ -178,7 +178,7 @@ function readForm(def){
   const d={},q=n=>document.querySelector(`[name="${n}"]`);
   for(const f of def.f){
     if(f.t=='sel'||f.t=='yn'){const c=document.querySelector(`input[name="${f.k}"]:checked`);d[f.k]=c?c.value:''}
-    else if(f.t=='bbc'){d[f.k]=q(f.k).value.trim();d[f.k+'_nf']=q(f.k+'_nf').checked}
+    else if(f.t=='bbc'){d[f.k]=q(f.k).value===''?0:+q(f.k).value;d[f.k+'_nf']=q(f.k+'_nf').checked}
     else if(f.t=='num')d[f.k]=q(f.k).value===''?0:+q(f.k).value;
     else d[f.k]=(f.w&&d[f.w[0]]!==f.w[1])?'':q(f.k).value.trim();
   }
@@ -210,7 +210,17 @@ function fin(){
 }
 
 /* ---------- Rekap ---------- */
+function rekapVerif(s){
+  const n=s.recs.length,r2=x=>Math.round(x*100)/100,v=(r,k)=>+r.d[k]||0;
+  const vt=s.recs.reduce((a,r)=>a+v(r,'hitung'),0),vp=n?vt/n:0,R=[['Jumlah pokok',n]];
+  const B=[1,2,3].map(k=>{const f=s.recs.filter(r=>!r.d['bbc'+k+'_nf']),t=f.reduce((a,r)=>a+v(r,'bbc'+k),0);return{k,t,c:f.length,p:f.length?t/f.length:0}});
+  R.push(['Total JJG','']);B.forEach(b=>R.push(['BBC'+b.k,b.t]));R.push(['Verifikasi',vt]);
+  R.push(['JJG/PKK','']);B.forEach(b=>R.push(['BBC'+b.k,b.c?r2(b.p):'-']));R.push(['Verifikasi',r2(vp)]);
+  R.push(['Komparasi Vs Verifikasi','']);B.forEach(b=>R.push(['BBC'+b.k,b.p?Math.round(vp/b.p*100)+'%':'-']));
+  return R;
+}
 function rekapLines(s){
+  if(s.type=='verif')return rekapVerif(s);
   const n=s.recs.length,R=[['Jumlah pokok',n]];
   const p=(a,b)=>b?(a/b*100).toFixed(1)+'%':'-',r2=x=>Math.round(x*100)/100;
   for(const f of s.def.f){
@@ -219,25 +229,17 @@ function rekapLines(s){
     else if(f.t=='sel')for(const o of f.o){const c=v.filter(x=>x==o).length;R.push([o,`${c} (${p(c,n)})`])}
     else if(f.t=='yn'){const c=v.filter(x=>x=='Ya').length;R.push([f.l+' = Ya',`${c} (${p(c,n)})`])}
   }
-  if(s.type=='verif'){
-    const hv=n?s.recs.reduce((a,r)=>a+(+r.d.hitung||0),0)/n:0;
-    R.push(['Komparasi BBC vs Hitung Verifikasi','']);
-    for(const k of [1,2,3]){
-      const c=s.recs.filter(r=>!r.d['bbc'+k+'_nf']).length,jp=n?c/n:0;
-      R.push([`BBC${k} ditemukan`,`${c} (${p(c,n)})`],[`BBC${k} jjg/pkk`,r2(jp)],[`BBC${k} % komparasi thd hitung verifikasi`,hv?(jp/hv*100).toFixed(1)+'%':'-']);
-    }
-  }
   return R;
 }
 const waText=s=>`*REKAP ${title(s).toUpperCase()}*\nPT. Bima Palma Nugraha\n${hinfo(s)}\n`+rekapLines(s).map(([l,v])=>v===''?`\n*${l}*`:`${l}: ${v}`).join('\n');
-const summ=r=>Object.entries(r.d).map(([k,v])=>v===true?'tdk ditemukan':v===false||v===''?null:v).filter(x=>x!==null).join(' · ');
+const summ=(s,r)=>s.def.f.map(f=>f.t=='bbc'&&r.d[f.k+'_nf']?'tdk ditemukan':r.d[f.k]).filter(v=>v!==''&&v!==undefined).join(' · ');
 function rekapView(id){
   const s=find(id);
   show('Rekap',title(s),`
   <div class="card"><b>${E(title(s))}</b><div class="m">${E(hinfo(s))}</div>
   <table>${rekapLines(s).map(([l,v])=>v===''?`<tr><td colspan="2"><b>${E(l)}</b></td></tr>`:`<tr><td>${E(l)}</td><td class="r">${E(v)}</td></tr>`).join('')}</table></div>
   <div class="card"><div class="row"><button class="b" onclick="shareTxt(${id})">Share Rekap (WA Text)</button><button class="b" onclick="shareCSV(${id})">Share CSV (WA)</button></div></div>
-  <div class="card"><b>Koreksi Data</b>${s.recs.map(r=>`<div class="item"><span><b>Pokok ${r.no}</b> · ${E(summ(r))}</span><button class="b" onclick="go('edit','${s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`,
+  <div class="card"><b>Koreksi Data</b>${s.recs.map(r=>`<div class="item"><span><b>Pokok ${r.no}</b> · ${E(summ(s,r))}</span><button class="b" onclick="go('edit','${s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`,
   {back:1});
 }
 function editView(a){
