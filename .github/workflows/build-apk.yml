@@ -28,6 +28,9 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Generate app icons
+        run: npx @capacitor/assets generate --android
+
       - name: Add location permissions
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <application#' android/app/src/main/AndroidManifest.xml
@@ -43,5 +46,3 @@ jobs:
         with:
           name: SensusBlok-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-      - name: Generate app icons
-        run: npx @capacitor/assets generate --android
