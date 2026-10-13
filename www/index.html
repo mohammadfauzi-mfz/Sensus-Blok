@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sensus Blok</title>
+<style>
+:root{--g:#2e7d32;--r:#c62828;--bg:#f2f5f0;--t:#1b1f1a;--m:#6b7569}
+*{box-sizing:border-box}
+body{margin:0;font:16px system-ui,sans-serif;background:var(--bg);color:var(--t);padding-bottom:90px}
+header{background:var(--g);color:#fff;padding:calc(12px + env(safe-area-inset-top)) 12px 12px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:5}
+header h1{font-size:18px;margin:0;flex:1}
+header small{display:block;font-weight:400;font-size:12px;opacity:.85}
+header button{background:none;border:0;color:#fff;font-size:24px;padding:4px 8px}
+main{padding:12px;max-width:640px;margin:auto}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 1px 3px #0002}
+label{display:block;font-size:13px;color:var(--m);margin:10px 0 4px}
+input,select{width:100%;padding:11px;border:1px solid #c5ccc3;border-radius:8px;font:inherit;background:#fff}
+textarea{width:100%;min-height:110px;padding:11px;border:1px solid #c5ccc3;border-radius:8px;font:inherit}
+.opt{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #c5ccc3;border-radius:8px;margin:6px 0;color:var(--t);font-size:16px}
+.opt input{width:auto}
+.b{padding:12px 16px;border:0;border-radius:10px;font:inherit;font-weight:600;color:#fff;background:var(--g)}
+.b:disabled{background:#b0b8ae}
+.gray{background:#78857a}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.row .b{flex:1}
+.bar{position:fixed;left:0;right:0;bottom:0;display:none;gap:10px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:#fff;box-shadow:0 -2px 6px #0003}
+.bar .b{flex:1;padding:16px;font-size:17px}
+.chip{padding:8px 12px;border-radius:20px;font-weight:600;display:inline-block}
+.ok{background:#c8e6c9;color:#1b5e20}
+.bad{background:#ffe0b2;color:#e65100}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+td{padding:6px 4px;border-bottom:1px solid #e3e8e1;font-size:14px}
+.r{text-align:right;font-weight:600}
+.m{color:var(--m);font-size:13px;white-space:pre-line}
+.item{padding:10px 0;border-bottom:1px solid #e3e8e1;display:flex;gap:8px;align-items:center;font-size:14px}
+.item span{flex:1}
+.item button{padding:8px 12px}
+h2{margin:0 0 4px}
+.center{text-align:center}
+</style>
+</head>
+<body>
+<header id="hd"></header>
+<main id="app"></main>
+<div id="bar" class="bar"></div>
+<script>
+const KAT=['Normal','Sisip','Pokok Gajah','Buah Aborsi','Kerdil Genetik','Double Tone','Abnormal lain'];
+const HAMA=['Ulat Api','Ulat Kantong','Tikus','Kumbang Tanduk','Rayap','Ganoderma','Busuk Pangkal Batang','Lainnya (ketik)'];
+const TYPES={
+  pokok:{n:'Sensus Pokok',f:[
+    {k:'kat',l:'Kategori Pokok',t:'sel',o:KAT},
+    {k:'ket',l:'Keterangan abnormal lain',t:'text',w:['kat','Abnormal lain']}]},
+  bbc:{n:'Sensus BBC',f:[
+    {k:'jjg',l:'Jumlah Janjang',t:'num'},
+    {k:'jantan',l:'Ada Bunga Jantan?',t:'yn'}]},
+  verif:{n:'Verifikasi BBC',f:[
+    {k:'bbc1',l:'Tulisan Janjang BBC1 di Pokok',t:'bbc'},
+    {k:'bbc2',l:'Tulisan Janjang BBC2 di Pokok',t:'bbc'},
+    {k:'bbc3',l:'Tulisan Janjang BBC3 di Pokok',t:'bbc'},
+    {k:'hitung',l:'Janjang Hitung Verifikasi',t:'num'}]},
+  hama:{n:'Sensus Hama dan Penyakit',f:[{k:'jml',l:'Jumlah',t:'num'}]}
+};
+const MENU=[['pokok','1. Sensus Pokok'],['bbc','2. Sensus BBC'],['verif','3. Verifikasi BBC'],['hama','4. Sensus Hama dan Penyakit'],['custom','5. Lainnya (Tambah Sensus Custom)']];
+const HL={tgl:'Tanggal Sensus',estate:'Estate',afd:'Afdeling',blok:'Blok',baris:'Baris',arah:'Arah Masuk',petugas:'Nama Petugas Sensus'};
+
+const $=s=>document.querySelector(s);
+const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
+const S=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const slug=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+let stk=[],va=null,sessions=L('sessions',[]),customs=L('customs',[]),hdr=L('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
+const find=id=>sessions.find(s=>s.id==id);
+const title=s=>s.def.n+(s.extra?' – '+s.extra:'');
+const hinfo=s=>{const h=s.h;return `Tanggal: ${h.tgl}\nEstate: ${h.estate}\nAfdeling: ${h.afd}\nBlok: ${h.blok}\nBaris: ${h.baris}\nArah Masuk: ${h.arah}\nPetugas: ${h.petugas}`};
+
+/* ---------- GPS ---------- */
+function gpsInit(){
+  Promise.resolve().then(()=>Capacitor.Plugins.Geolocation.requestPermissions()).catch(()=>{}).then(()=>{
+    navigator.geolocation.watchPosition(
+      p=>{cur={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};gpsUi()},
+      e=>{cur=null;gpsUi(e.message)},
+      {enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  });
+}
+function gpsUi(err){
+  const ok=cur&&cur.acc<=5,el=$('#gps');
+  if(el){
+    el.className='chip '+(ok?'ok':'bad');
+    el.textContent=cur?`GPS ±${cur.acc.toFixed(1)} m ${ok?'✓ siap':'(tunggu ≤ 5 m)'}`:(err?'GPS error: '+err:'Mencari GPS…');
+  }
+  const m=$('#mulai');if(m)m.disabled=!ok;
+}
+function coUi(){
+  const el=$('#co');if(!el)return;
+  el.innerHTML=pg&&pg.lat!==''?`📍 ${(+pg.lat).toFixed(6)}, ${(+pg.lon).toFixed(6)} (±${(+pg.acc).toFixed(1)} m)`:'📍 Koordinat belum tersedia';
+}
+
+/* ---------- Layout & navigasi ---------- */
+function show(t,sub,html,o={}){
+  $('#hd').innerHTML=(o.back?`<button onclick="history.back()">←</button>`:'')+`<h1>${E(t)}<small>${E(sub||'')}</small></h1>`+(view=='about'||view=='run'?'':`<button onclick="go('about')" aria-label="Informasi">ⓘ</button>`);
+  $('#app').innerHTML=html;
+  const b=$('#bar');b.style.display=o.bar?'flex':'none';b.innerHTML=o.bar||'';
+  document.body.style.paddingBottom=o.bar?'90px':'20px';
+  scrollTo(0,0);
+}
+function go(v,a,np){
+  if(view=='home'&&$('#h_estate'))readHdr();
+  if(!np){stk.push([view,va]);history.pushState({},'')}
+  view=v;va=a;
+  ({home,run:runPage,rekap:rekapView,hist:histView,custom:customView,about:aboutView,edit:editView})[v](a);
+}
+onpopstate=()=>{
+  if(!stk.length)return;
+  if(view=='run'&&!confirm('Keluar dari halaman sensus? Pokok yang sudah di-Next tetap tersimpan dan bisa dilanjutkan dari Riwayat.')){history.pushState({},'');return}
+  const [v,a]=stk.pop();go(v,a,true);
+};
+
+/* ---------- Beranda ---------- */
+function readHdr(){
+  const h={};for(const k in HL)h[k]=($('#h_'+k).value||'').trim();
+  hdr=h;S('hdr',{...h,tgl:undefined});return h;
+}
+function home(){
+  const h=hdr;
+  show('Sensus Blok','PT. Bima Palma Nugraha',`
+  <div class="card"><div id="gps" class="chip bad">Mencari GPS…</div>
+  ${Object.entries(HL).map(([k,l])=>`<label>${l}</label><input id="h_${k}" type="${k=='tgl'?'date':'text'}" value="${E(h[k]||(k=='tgl'?today():''))}">`).join('')}</div>
+  <div class="card"><b>Pilihan Menu</b>
+  ${MENU.map(([v,l])=>`<label class="opt"><input type="radio" name="menu" ${sel.type==v?'checked':''} onchange="sel.type='${v}';ex()"> ${l}</label>`).join('')}
+  <div id="ex"></div></div>
+  <button class="b gray" style="width:100%" onclick="go('hist')">Riwayat Data &amp; Rekap</button>`,
+  {bar:`<button id="mulai" class="b" disabled onclick="mulai()">MULAI</button>`});
+  ex();gpsUi();
+}
+function ex(){
+  const el=$('#ex');
+  if(sel.type=='hama'){
+    el.innerHTML=`<label>Jenis Hama / Penyakit</label><select onchange="sel.jenis=this.value;ex()">${HAMA.map(o=>`<option ${o==sel.jenis?'selected':''}>${o}</option>`).join('')}</select>${sel.jenis==HAMA[HAMA.length-1]?'<input id="jx" placeholder="Ketik jenis hama / penyakit" style="margin-top:8px">':''}`;
+  }else if(sel.type=='custom'){
+    el.innerHTML=(customs.length?`<label>Pilih Sensus Custom</label><select onchange="sel.cid=this.value">${customs.map(c=>`<option value="${c.id}" ${c.id==sel.cid?'selected':''}>${E(c.n)}</option>`).join('')}</select>`:'<p class="m">Belum ada sensus custom.</p>')+`<div class="row"><button class="b gray" onclick="go('custom')">Kelola / Tambah Sensus Custom</button></div>`;
+  }else el.innerHTML='';
+}
+function mulai(){
+  const h=readHdr(),miss=Object.keys(HL).filter(k=>!h[k]).map(k=>HL[k]);
+  if(miss.length)return alert('Lengkapi dulu: '+miss.join(', '));
+  let def,extra='';
+  if(sel.type=='custom'){def=customs.find(x=>x.id==sel.cid)||customs[0];if(!def)return alert('Buat sensus custom dulu.')}
+  else def=TYPES[sel.type];
+  if(sel.type=='hama'){extra=sel.jenis==HAMA[HAMA.length-1]?$('#jx').value.trim():sel.jenis;if(!extra)return alert('Ketik jenis hama / penyakit.')}
+  const s={id:Date.now(),type:sel.type,def:{n:def.n,f:def.f},h,extra,recs:[],done:false};
+  sessions.unshift(s);S('sessions',sessions);go('run',s.id);
+}
+
+/* ---------- Form generik ---------- */
+function formHTML(def,d={}){
+  fdef=def;
+  return def.f.map(f=>{
+    const v=d[f.k];let h='';
+    if(f.t=='num')h=`<label>${E(f.l)}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0">`;
+    else if(f.t=='text')h=`<label>${E(f.l)}</label><input name="${f.k}" value="${E(v??'')}">`;
+    else if(f.t=='bbc')h=`<label>${E(f.l)}</label><input name="${f.k}" value="${E(v??'')}"><label class="opt"><input type="checkbox" name="${f.k}_nf" ${d[f.k+'_nf']?'checked':''}> Tidak ditemukan</label>`;
+    else{
+      const os=f.t=='yn'?['Ya','Tidak']:f.o,cv=v??(f.t=='yn'?'Tidak':os[0]);
+      h=`<label>${E(f.l)}</label>`+os.map(o=>`<label class="opt"><input type="radio" name="${f.k}" value="${E(o)}" ${o==cv?'checked':''} onchange="vis()"> ${E(o)}</label>`).join('');
+    }
+    return `<div id="w_${f.k}">${h}</div>`;
+  }).join('');
+}
+function vis(){
+  for(const f of fdef.f)if(f.w){
+    const c=document.querySelector(`input[name="${f.w[0]}"]:checked`);
+    $('#w_'+f.k).style.display=c&&c.value==f.w[1]?'':'none';
+  }
+}
+function readForm(def){
+  const d={},q=n=>document.querySelector(`[name="${n}"]`);
+  for(const f of def.f){
+    if(f.t=='sel'||f.t=='yn'){const c=document.querySelector(`input[name="${f.k}"]:checked`);d[f.k]=c?c.value:''}
+    else if(f.t=='bbc'){d[f.k]=q(f.k).value.trim();d[f.k+'_nf']=q(f.k+'_nf').checked}
+    else if(f.t=='num')d[f.k]=q(f.k).value===''?0:+q(f.k).value;
+    else d[f.k]=(f.w&&d[f.w[0]]!==f.w[1])?'':q(f.k).value.trim();
+  }
+  return d;
+}
+
+/* ---------- Halaman sensus (1 halaman = 1 pokok) ---------- */
+function runPage(id){
+  if(id)run=find(id);
+  const s=run,n=s.recs.length+1;
+  pg=cur?{...cur}:{lat:'',lon:'',acc:''};
+  show(title(s),`Blok ${s.h.blok} · ${s.h.petugas}`,`
+  <div class="card"><h2>Pokok No. ${n}</h2>
+  <div id="co" class="m"></div>
+  <div class="row"><button class="b gray" style="padding:8px" onclick="if(cur){pg={...cur};coUi()}">Ambil ulang koordinat</button></div>
+  ${formHTML(s.def)}</div>`,
+  {back:1,bar:`<button class="b" style="background:var(--r)" onclick="fin()">FINISH</button><button class="b" onclick="nxt()">NEXT ▶</button>`});
+  coUi();vis();
+}
+function saveCur(){
+  const s=run;
+  s.recs.push({no:s.recs.length+1,lat:pg.lat,lon:pg.lon,acc:pg.acc,t:new Date().toISOString(),d:readForm(s.def)});
+  S('sessions',sessions);
+}
+function nxt(){saveCur();runPage()}
+function fin(){
+  if(!confirm(`Selesaikan sensus? Pokok No. ${run.recs.length+1} yang sedang tampil juga akan disimpan.`))return;
+  saveCur();run.done=true;S('sessions',sessions);go('rekap',run.id,true);
+}
+
+/* ---------- Rekap ---------- */
+function rekapLines(s){
+  const n=s.recs.length,R=[['Jumlah pokok',n]];
+  const p=(a,b)=>b?(a/b*100).toFixed(1)+'%':'-',r2=x=>Math.round(x*100)/100;
+  for(const f of s.def.f){
+    const v=s.recs.map(r=>r.d[f.k]);
+    if(f.t=='num'){const t=v.reduce((a,b)=>a+(+b||0),0);R.push(['Total '+f.l,r2(t)],['Rata-rata/pokok '+f.l,n?r2(t/n):0])}
+    else if(f.t=='sel')for(const o of f.o){const c=v.filter(x=>x==o).length;R.push([o,`${c} (${p(c,n)})`])}
+    else if(f.t=='yn'){const c=v.filter(x=>x=='Ya').length;R.push([f.l+' = Ya',`${c} (${p(c,n)})`])}
+  }
+  if(s.type=='verif'){
+    const hv=n?s.recs.reduce((a,r)=>a+(+r.d.hitung||0),0)/n:0;
+    R.push(['Komparasi BBC vs Hitung Verifikasi','']);
+    for(const k of [1,2,3]){
+      const c=s.recs.filter(r=>!r.d['bbc'+k+'_nf']).length,jp=n?c/n:0;
+      R.push([`BBC${k} ditemukan`,`${c} (${p(c,n)})`],[`BBC${k} jjg/pkk`,r2(jp)],[`BBC${k} % komparasi thd hitung verifikasi`,hv?(jp/hv*100).toFixed(1)+'%':'-']);
+    }
+  }
+  return R;
+}
+const waText=s=>`*REKAP ${title(s).toUpperCase()}*\nPT. Bima Palma Nugraha\n${hinfo(s)}\n`+rekapLines(s).map(([l,v])=>v===''?`\n*${l}*`:`${l}: ${v}`).join('\n');
+const summ=r=>Object.entries(r.d).map(([k,v])=>v===true?'tdk ditemukan':v===false||v===''?null:v).filter(x=>x!==null).join(' · ');
+function rekapView(id){
+  const s=find(id);
+  show('Rekap',title(s),`
+  <div class="card"><b>${E(title(s))}</b><div class="m">${E(hinfo(s))}</div>
+  <table>${rekapLines(s).map(([l,v])=>v===''?`<tr><td colspan="2"><b>${E(l)}</b></td></tr>`:`<tr><td>${E(l)}</td><td class="r">${E(v)}</td></tr>`).join('')}</table></div>
+  <div class="card"><div class="row"><button class="b" onclick="shareTxt(${id})">Share Rekap (WA Text)</button><button class="b" onclick="shareCSV(${id})">Share CSV (WA)</button></div></div>
+  <div class="card"><b>Koreksi Data</b>${s.recs.map(r=>`<div class="item"><span><b>Pokok ${r.no}</b> · ${E(summ(r))}</span><button class="b" onclick="go('edit','${s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`,
+  {back:1});
+}
+function editView(a){
+  const [id,no]=a.split(':'),s=find(id),r=s.recs[no-1];
+  show('Koreksi Pokok '+no,title(s),`<div class="card"><div class="m">📍 ${(+r.lat).toFixed(6)}, ${(+r.lon).toFixed(6)}</div>${formHTML(s.def,r.d)}</div>`,
+  {back:1,bar:`<button class="b gray" onclick="history.back()">BATAL</button><button class="b" onclick="saveEdit('${id}',${no})">SIMPAN</button>`});
+  vis();
+}
+function saveEdit(id,no){
+  const s=find(id);s.recs[no-1].d=readForm(s.def);S('sessions',sessions);
+  history.back();
+}
+
+/* ---------- CSV & Share WA ---------- */
+function csv(s){
+  const h=s.h,cols=['tanggal','estate','afdeling','blok','baris','arah_masuk','petugas','jenis_sensus','no_pokok','latitude','longitude','akurasi_m','waktu'];
+  const fk=[];for(const f of s.def.f){fk.push([f.k,slug(f.l)]);if(f.t=='bbc')fk.push([f.k+'_nf',slug(f.l)+'_tdk_ditemukan'])}
+  const q=x=>{x=String(x??'');return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x};
+  const rows=[cols.concat(fk.map(x=>x[1]))].concat(s.recs.map(r=>
+    [h.tgl,h.estate,h.afd,h.blok,h.baris,h.arah,h.petugas,title(s),r.no,r.lat,r.lon,r.acc!==''?(+r.acc).toFixed(1):'',r.t]
+    .concat(fk.map(([k])=>{const v=r.d[k];return v===true?'Ya':v===false?'Tidak':v}))));
+  return rows.map(r=>r.map(q).join(',')).join('\n');
+}
+async function shareTxt(id){
+  const t=waText(find(id));
+  try{await Capacitor.Plugins.Share.share({text:t,dialogTitle:'Bagikan Rekap'})}
+  catch(e){if(!/cancel/i.test(e&&e.message||''))location.href='https://wa.me/?text='+encodeURIComponent(t)}
+}
+async function shareCSV(id){
+  const s=find(id),name=`sensus_${slug(title(s))}_${slug(s.h.blok)}_${s.h.tgl}.csv`;
+  try{
+    const P=Capacitor.Plugins,r=await P.Filesystem.writeFile({path:name,data:csv(s),directory:'CACHE',encoding:'utf8'});
+    await P.Share.share({title:name,files:[r.uri],dialogTitle:'Bagikan CSV'});
+  }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan CSV: '+(e&&e.message||e))}
+}
+
+/* ---------- Riwayat ---------- */
+function histView(){
+  show('Riwayat Data','',sessions.length?sessions.map(s=>`<div class="card"><b>${E(title(s))}</b>
+  <div class="m">${E(s.h.tgl)} · Blok ${E(s.h.blok)} · ${s.recs.length} pokok · ${s.done?'Selesai':'Belum selesai'}</div>
+  <div class="row"><button class="b" onclick="go('rekap',${s.id})">Rekap</button>${s.done?'':`<button class="b" style="background:#f57c00" onclick="go('run',${s.id})">Lanjutkan</button>`}<button class="b" style="background:var(--r)" onclick="del(${s.id})">Hapus</button></div></div>`).join(''):'<p class="m">Belum ada data.</p>',{back:1});
+}
+function del(id){
+  if(!confirm('Hapus data sensus ini? Tidak bisa dikembalikan.'))return;
+  sessions=sessions.filter(s=>s.id!=id);S('sessions',sessions);histView();
+}
+
+/* ---------- Sensus custom ---------- */
+function customView(){
+  show('Sensus Custom','',`
+  <div class="card"><b>Tambah Sensus Custom</b>
+  <label>Nama Sensus</label><input id="cn" placeholder="mis. Sensus Pelepah">
+  <label>Kolom isian (satu baris = satu kolom). Tambahkan :angka, :teks atau :yatidak di belakang nama. Tanpa tambahan = angka.</label>
+  <textarea id="cf" placeholder="Jumlah pelepah\nCatatan:teks\nAda buah?:yatidak"></textarea>
+  <div class="row"><button class="b" onclick="saveCustom()">Simpan</button></div></div>
+  <div class="card"><b>Sensus Custom Tersimpan</b>${customs.map(c=>`<div class="item"><span>${E(c.n)} (${c.f.length} kolom)</span><button class="b" style="background:var(--r)" onclick="delCustom(${c.id})">Hapus</button></div>`).join('')||'<p class="m">Belum ada.</p>'}</div>`,{back:1});
+}
+function saveCustom(){
+  const n=$('#cn').value.trim(),ls=$('#cf').value.split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!n||!ls.length)return alert('Isi nama sensus dan minimal 1 kolom.');
+  const T={angka:'num',teks:'text',yatidak:'yn'};
+  const f=ls.map((x,i)=>{const m=x.match(/^(.*):(angka|teks|yatidak)$/i);return{k:'f'+(i+1),l:(m?m[1]:x).trim(),t:T[(m?m[2]:'angka').toLowerCase()]}});
+  const c={id:Date.now(),n,f};customs.push(c);S('customs',customs);sel.cid=c.id;customView();
+}
+function delCustom(id){
+  if(!confirm('Hapus sensus custom ini? Data hasil sensus yang sudah ada tetap aman.'))return;
+  customs=customs.filter(c=>c.id!=id);S('customs',customs);customView();
+}
+
+/* ---------- About ---------- */
+function aboutView(){
+  show('About Application','',`
+  <div class="card center" style="padding:32px 16px">
+    <h2>Create By Mohammad Fauzi</h2>
+    <p>Contact Me for Suggestion &amp; Feedback</p>
+    <a href="https://wa.me/6285252390543" aria-label="WhatsApp">
+      <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#25D366"/><path d="M32 11C20.4 11 11 20.4 11 32c0 3.8 1 7.3 2.8 10.4L11 53l10.9-2.8A20.9 20.9 0 0 0 32 53c11.6 0 21-9.4 21-21S43.6 11 32 11z" fill="none" stroke="#fff" stroke-width="3"/><path d="M24 22c-1 3 1 8 6 12s9 6 12 5l2-4-5-3-3 2c-2-1-5-3-6-6l2-3-3-5z" fill="#fff"/></svg>
+    </a>
+  </div>
+  <p class="m center" style="margin-top:40px">Versi Aplikasi 1.0</p>`,{back:1});
+}
+
+/* ---------- Mulai ---------- */
+go('home',0,true);
+gpsInit();
+</script>
+</body>
+</html>
