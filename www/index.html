@@ -38,6 +38,14 @@ td{padding:6px 4px;border-bottom:1px solid #e3e8e1;font-size:14px}
 .item button{padding:8px 12px}
 h2{margin:0 0 4px}
 .center{text-align:center}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1;padding:10px;border:0;border-radius:10px;background:#dfe6dc;font:inherit;font-weight:600;color:var(--t)}
+.tabs .on{background:var(--g);color:#fff}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.cell{background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px #0002}
+.cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#ddd}
+.cap{padding:6px 8px;font-size:12px}
+.pv{width:100%;border-radius:8px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -70,14 +78,15 @@ const L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){retur
 const S=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const slug=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-let stk=[],va=null,sessions=L('sessions',[]),customs=L('customs',[]),hdr=L('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
+let gU=[],draft=null,galData=[],gf={f:'all',q:''},lxRaw=null,lxK=+L('luxk',1)||1,stk=[],va=null,sessions=L('sessions',[]),customs=L('customs',[]),hdr=L('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
+const plug=n=>{const C=window.Capacitor;if(!C)return null;return(C.Plugins&&C.Plugins[n])||(C.registerPlugin?C.registerPlugin(n):null)};
 const find=id=>sessions.find(s=>s.id==id);
 const title=s=>s.def.n+(s.extra?' – '+s.extra:'');
 const hinfo=s=>{const h=s.h;return `Tanggal: ${h.tgl}\nEstate: ${h.estate}\nAfdeling: ${h.afd}\nBlok: ${h.blok}\nBaris: ${h.baris}\nArah Masuk: ${h.arah}\nPetugas: ${h.petugas}`};
 
 /* ---------- GPS ---------- */
 function gpsInit(){
-  Promise.resolve().then(()=>Capacitor.Plugins.Geolocation.requestPermissions()).catch(()=>{}).then(()=>{
+  Promise.resolve().then(()=>plug('Geolocation').requestPermissions()).catch(()=>{}).then(()=>{
     navigator.geolocation.watchPosition(
       p=>{cur={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy};gpsUi()},
       e=>{cur=null;gpsUi(e.message)},
@@ -94,14 +103,15 @@ function gpsUi(err){
 }
 function coUi(){
   const el=$('#co');if(!el)return;
-  el.innerHTML=pg&&pg.lat!==''?`📍 ${(+pg.lat).toFixed(6)}, ${(+pg.lon).toFixed(6)} (±${(+pg.acc).toFixed(1)} m)`:'📍 Koordinat belum tersedia';
+  el.innerHTML=(pg&&pg.lat!==''?`📍 ${(+pg.lat).toFixed(6)}, ${(+pg.lon).toFixed(6)} (±${(+pg.acc).toFixed(1)} m)`:'📍 Koordinat belum tersedia')+'<br>'+(pg&&pg.lux!==''&&pg.lux!=null?`☀ ${pg.lux} lux`:'☀ Lux belum tersedia');
 }
 
 /* ---------- Layout & navigasi ---------- */
 function show(t,sub,html,o={}){
   $('#hd').innerHTML=(o.back?`<button onclick="history.back()">←</button>`:'')+`<h1>${E(t)}<small>${E(sub||'')}</small></h1>`+(view=='about'||view=='run'?'':`<button onclick="go('about')" aria-label="Informasi">ⓘ</button>`);
+  gU.forEach(u=>URL.revokeObjectURL(u));gU=[];
   $('#app').innerHTML=html;
-  const b=$('#bar');b.style.display=o.bar?'flex':'none';b.innerHTML=o.bar||'';
+  const b=$('#bar');b.style.display=o.bar?'flex':'none';b.style.pointerEvents='';b.innerHTML=o.bar||'';
   document.body.style.paddingBottom=o.bar?'90px':'20px';
   scrollTo(0,0);
 }
@@ -109,7 +119,7 @@ function go(v,a,np){
   if(view=='home'&&$('#h_estate'))readHdr();
   if(!np){stk.push([view,va]);history.pushState({},'')}
   view=v;va=a;
-  ({home,run:runPage,rekap:rekapView,hist:histView,custom:customView,about:aboutView,edit:editView})[v](a);
+  ({home,run:runPage,rekap:rekapView,hist:histView,custom:customView,about:aboutView,edit:editView,gal:galView,photo:photoView})[v](a);
 }
 onpopstate=()=>{
   if(!stk.length)return;
@@ -124,15 +134,20 @@ function readHdr(){
 }
 function home(){
   const h=hdr;
-  show('Sensus Blok','PT. Bima Palma Nugraha',`
+  show('Sensus Blok','PT. Bima Palma Nugraha',`${tabs('home')}
   <div class="card"><div id="gps" class="chip bad">Mencari GPS…</div>
   ${Object.entries(HL).map(([k,l])=>`<label>${l}</label><input id="h_${k}" type="${k=='tgl'?'date':'text'}" value="${E(h[k]||(k=='tgl'?today():''))}">`).join('')}</div>
+  <div class="card"><b>Lux Meter</b> <span id="lux" class="chip bad">Mencari sensor…</span>
+  <div id="lk" class="m"></div>
+  <label>Kalibrasi: isi lux dari alat ukur referensi (sensor HP didekatkan ke alat)</label>
+  <input id="lref" type="number" inputmode="decimal" placeholder="mis. 500">
+  <div class="row"><button class="b" onclick="calLux()">Kalibrasi</button><button class="b gray" onclick="resetLux()">Reset</button></div></div>
   <div class="card"><b>Pilihan Menu</b>
   ${MENU.map(([v,l])=>`<label class="opt"><input type="radio" name="menu" ${sel.type==v?'checked':''} onchange="sel.type='${v}';ex()"> ${l}</label>`).join('')}
   <div id="ex"></div></div>
   <button class="b gray" style="width:100%" onclick="go('hist')">Riwayat Data &amp; Rekap</button>`,
   {bar:`<button id="mulai" class="b" disabled onclick="mulai()">MULAI</button>`});
-  ex();gpsUi();
+  ex();gpsUi();luxUi();
 }
 function ex(){
   const el=$('#ex');
@@ -189,24 +204,36 @@ function readForm(def){
 function runPage(id){
   if(id)run=find(id);
   const s=run,n=s.recs.length+1;
-  pg=cur?{...cur}:{lat:'',lon:'',acc:''};
+  pg=cur?{...cur}:{lat:'',lon:'',acc:''};pg.lux=luxVal();draft=null;
   show(title(s),`Blok ${s.h.blok} · ${s.h.petugas}`,`
   <div class="card"><h2>Pokok No. ${n}</h2>
   <div id="co" class="m"></div>
-  <div class="row"><button class="b gray" style="padding:8px" onclick="if(cur){pg={...cur};coUi()}">Ambil ulang koordinat</button></div>
-  ${formHTML(s.def)}</div>`,
+  <div class="row"><button class="b gray" style="padding:8px" onclick="if(cur)pg={...cur};pg.lux=luxVal();coUi()">Ambil ulang koordinat &amp; lux</button></div>
+  ${formHTML(s.def)}</div>
+  <div class="card"><b>Foto Pokok</b>
+  <div class="row"><button id="fbtn" class="b" onclick="ambilFoto()">📷 Ambil Foto</button></div>
+  <canvas id="pv" class="pv" style="display:none"></canvas>
+  <label>Keterangan foto</label><input id="ket" placeholder="Keterangan foto (opsional)" oninput="pvUpdate()"></div>`,
   {back:1,bar:`<button class="b" style="background:var(--r)" onclick="fin()">FINISH</button><button class="b" onclick="nxt()">NEXT ▶</button>`});
   coUi();vis();
 }
-function saveCur(){
-  const s=run;
-  s.recs.push({no:s.recs.length+1,lat:pg.lat,lon:pg.lon,acc:pg.acc,t:new Date().toISOString(),d:readForm(s.def)});
+const cb=(c,q)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
+const lock=()=>{$('#bar').style.pointerEvents='none'};
+async function saveCur(){
+  const s=run,no=s.recs.length+1,ket=($('#ket')||{value:''}).value.trim(),d=readForm(s.def);
+  s.recs.push({no,lat:pg.lat,lon:pg.lon,acc:pg.acc,lux:pg.lux,t:new Date().toISOString(),d});
   S('sessions',sessions);
+  if(!draft)return;
+  const c=wm(draft.base,wmLines(s,no,ket,draft.t)),k=320/Math.max(c.width,c.height),tc=document.createElement('canvas');
+  tc.width=Math.round(c.width*k);tc.height=Math.round(c.height*k);tc.getContext('2d').drawImage(c,0,0,tc.width,tc.height);
+  const blob=await cb(c,.85),th=await cb(tc,.7),h=s.h;
+  await pPut({id:s.id+'_'+no,sid:s.id,no,t:draft.t.toISOString(),tgl:h.tgl,jenis:title(s),estate:h.estate,afd:h.afd,blok:h.blok,baris:h.baris,arah:h.arah,petugas:h.petugas,ket,blob,th});
 }
-function nxt(){saveCur();runPage()}
-function fin(){
+async function nxt(){lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}runPage()}
+async function fin(){
   if(!confirm(`Selesaikan sensus? Pokok No. ${run.recs.length+1} yang sedang tampil juga akan disimpan.`))return;
-  saveCur();run.done=true;S('sessions',sessions);go('rekap',run.id,true);
+  lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}
+  run.done=true;S('sessions',sessions);go('rekap',run.id,true);
 }
 
 /* ---------- Rekap ---------- */
@@ -220,6 +247,11 @@ function rekapVerif(s){
   return R;
 }
 function rekapLines(s){
+  const R=rekapBase(s),v=s.recs.map(r=>r.lux).filter(x=>x!==''&&x!=null&&!isNaN(x));
+  if(v.length)R.push(['Rata-rata Lux',Math.round(v.reduce((a,b)=>a+ +b,0)/v.length)]);
+  return R;
+}
+function rekapBase(s){
   if(s.type=='verif')return rekapVerif(s);
   const n=s.recs.length,R=[['Jumlah pokok',n]];
   const p=(a,b)=>b?(a/b*100).toFixed(1)+'%':'-',r2=x=>Math.round(x*100)/100;
@@ -255,24 +287,24 @@ function saveEdit(id,no){
 
 /* ---------- CSV & Share WA ---------- */
 function csv(s){
-  const h=s.h,cols=['tanggal','estate','afdeling','blok','baris','arah_masuk','petugas','jenis_sensus','no_pokok','latitude','longitude','akurasi_m','waktu'];
+  const h=s.h,cols=['tanggal','estate','afdeling','blok','baris','arah_masuk','petugas','jenis_sensus','no_pokok','latitude','longitude','akurasi_m','lux','waktu'];
   const fk=[];for(const f of s.def.f){fk.push([f.k,slug(f.l)]);if(f.t=='bbc')fk.push([f.k+'_nf',slug(f.l)+'_tdk_ditemukan'])}
   const q=x=>{x=String(x??'');return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x};
   const rows=[cols.concat(fk.map(x=>x[1]))].concat(s.recs.map(r=>
-    [h.tgl,h.estate,h.afd,h.blok,h.baris,h.arah,h.petugas,title(s),r.no,r.lat,r.lon,r.acc!==''?(+r.acc).toFixed(1):'',r.t]
+    [h.tgl,h.estate,h.afd,h.blok,h.baris,h.arah,h.petugas,title(s),r.no,r.lat,r.lon,r.acc!==''?(+r.acc).toFixed(1):'',r.lux??'',r.t]
     .concat(fk.map(([k])=>{const v=r.d[k];return v===true?'Ya':v===false?'Tidak':v}))));
   return rows.map(r=>r.map(q).join(',')).join('\n');
 }
 async function shareTxt(id){
   const t=waText(find(id));
-  try{await Capacitor.Plugins.Share.share({text:t,dialogTitle:'Bagikan Rekap'})}
+  try{await plug('Share').share({text:t,dialogTitle:'Bagikan Rekap'})}
   catch(e){if(!/cancel/i.test(e&&e.message||''))location.href='https://wa.me/?text='+encodeURIComponent(t)}
 }
 async function shareCSV(id){
   const s=find(id),name=`sensus_${slug(title(s))}_${slug(s.h.blok)}_${s.h.tgl}.csv`;
   try{
-    const P=Capacitor.Plugins,r=await P.Filesystem.writeFile({path:name,data:csv(s),directory:'CACHE',encoding:'utf8'});
-    await P.Share.share({title:name,files:[r.uri],dialogTitle:'Bagikan CSV'});
+    const r=await plug('Filesystem').writeFile({path:name,data:csv(s),directory:'CACHE',encoding:'utf8'});
+    await plug('Share').share({title:name,files:[r.uri],dialogTitle:'Bagikan CSV'});
   }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan CSV: '+(e&&e.message||e))}
 }
 
@@ -283,7 +315,7 @@ function histView(){
   <div class="row"><button class="b" onclick="go('rekap',${s.id})">Rekap</button>${s.done?'':`<button class="b" style="background:#f57c00" onclick="go('run',${s.id})">Lanjutkan</button>`}<button class="b" style="background:var(--r)" onclick="del(${s.id})">Hapus</button></div></div>`).join(''):'<p class="m">Belum ada data.</p>',{back:1});
 }
 function del(id){
-  if(!confirm('Hapus data sensus ini? Tidak bisa dikembalikan.'))return;
+  if(!confirm('Hapus data sensus ini? Foto di Galeri tetap tersimpan. Tidak bisa dikembalikan.'))return;
   sessions=sessions.filter(s=>s.id!=id);S('sessions',sessions);histView();
 }
 
@@ -319,12 +351,126 @@ function aboutView(){
       <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#25D366"/><path d="M32 11C20.4 11 11 20.4 11 32c0 3.8 1 7.3 2.8 10.4L11 53l10.9-2.8A20.9 20.9 0 0 0 32 53c11.6 0 21-9.4 21-21S43.6 11 32 11z" fill="none" stroke="#fff" stroke-width="3"/><path d="M24 22c-1 3 1 8 6 12s9 6 12 5l2-4-5-3-3 2c-2-1-5-3-6-6l2-3-3-5z" fill="#fff"/></svg>
     </a>
   </div>
-  <p class="m center" style="margin-top:40px">Versi Aplikasi 1.0</p>`,{back:1});
+  <p class="m center" style="margin-top:40px">Versi Aplikasi 1.1</p>`,{back:1});
+}
+
+/* ---------- Tab ---------- */
+const tabs=a=>`<div class="tabs"><button class="${a=='home'?'on':''}" onclick="${a=='home'?'':'history.back()'}">Sensus</button><button class="${a=='gal'?'on':''}" onclick="${a=='gal'?'':"go('gal')"}">Galeri</button></div>`;
+
+/* ---------- Lux meter ---------- */
+const luxVal=()=>lxRaw==null?'':Math.round(lxRaw*lxK*(lxRaw*lxK<10?10:1))/(lxRaw*lxK<10?10:1);
+function luxUi(err){
+  const el=$('#lux');if(!el)return;
+  const ok=lxRaw!=null;
+  el.className='chip '+(ok?'ok':'bad');
+  el.textContent=ok?`☀ ${luxVal()} lux`:(err||'Menunggu sensor…');
+  const k=$('#lk');if(k)k.textContent=ok?`Mentah: ${Math.round(lxRaw)} lux · Faktor kalibrasi: ×${lxK.toFixed(3)}`:'';
+}
+function luxInit(){
+  const P=plug('LightSensor');
+  if(!P){luxUi('Sensor cahaya hanya tersedia di aplikasi');return}
+  P.start().then(()=>setInterval(async()=>{
+    try{const r=await P.getLux();lxRaw=r.available?r.lux:null;luxUi()}catch(e){}
+  },500)).catch(e=>luxUi((e&&e.message)||'Sensor cahaya tidak tersedia'));
+}
+function calLux(){
+  const ref=parseFloat($('#lref').value);
+  if(!(ref>0)||!(lxRaw>0))return alert('Isi lux referensi dan pastikan sensor membaca nilai lebih dari 0.');
+  lxK=ref/lxRaw;S('luxk',lxK);luxUi();
+}
+function resetLux(){lxK=1;S('luxk',1);luxUi()}
+
+/* ---------- Foto: penyimpanan (IndexedDB) ---------- */
+const idb=new Promise((ok,no)=>{const r=indexedDB.open('sensus',1);r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'});r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+const tx=(m,f)=>idb.then(db=>new Promise((ok,no)=>{const t=db.transaction('photos',m),r=f(t.objectStore('photos'));t.oncomplete=()=>ok(r.result);t.onerror=()=>no(t.error)}));
+const pPut=r=>tx('readwrite',s=>s.put(r)),pAll=()=>tx('readonly',s=>s.getAll()),pDel=id=>tx('readwrite',s=>s.delete(id));
+
+/* ---------- Foto: ambil & watermark ---------- */
+const p2=n=>String(n).padStart(2,'0');
+const fmtDT=d=>`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+const wmLines=(s,no,ket,t)=>[fmtDT(t),title(s),`Blok ${s.h.blok} · Baris ${s.h.baris} · Arah ${s.h.arah}`,`Pokok ke-${no}`].concat(ket?['Ket: '+ket]:[]);
+function wm(base,lines){
+  const c=document.createElement('canvas');c.width=base.width;c.height=base.height;
+  const x=c.getContext('2d');x.drawImage(base,0,0);
+  const fs=Math.max(16,Math.round(c.width/38)),pad=Math.round(fs*.5),lh=Math.round(fs*1.3),maxW=c.width*.85;
+  x.font=`600 ${fs}px sans-serif`;x.textBaseline='top';
+  const out=[];
+  for(const ln of lines){let cl='';for(const w of ln.split(' ')){const tt=cl?cl+' '+w:w;if(x.measureText(tt).width>maxW&&cl){out.push(cl);cl=w}else cl=tt}out.push(cl)}
+  const w=Math.max(...out.map(l=>x.measureText(l).width))+pad*2,h=out.length*lh+pad*2-(lh-fs);
+  const X=pad,Y=c.height-h-pad;
+  x.fillStyle='rgba(0,0,0,.55)';x.fillRect(X,Y,w,h);
+  x.fillStyle='#fff';out.forEach((l,i)=>x.fillText(l,X+pad,Y+pad+i*lh));
+  return c;
+}
+async function snap(){
+  const C=plug('Camera');
+  if(C){
+    try{const r=await C.getPhoto({quality:80,resultType:'dataUrl',source:'CAMERA',correctOrientation:true});return r.dataUrl}
+    catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Kamera gagal: '+(e&&e.message||e));return null}
+  }
+  return new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.capture='environment';
+    i.onchange=()=>{const f=i.files[0];if(!f)return res(null);const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(f)};i.click()});
+}
+const loadImg=src=>new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=src});
+async function ambilFoto(){
+  try{
+    const u=await snap();if(!u)return;
+    const i=await loadImg(u),k=Math.min(1,1600/Math.max(i.width,i.height)),c=document.createElement('canvas');
+    c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);c.getContext('2d').drawImage(i,0,0,c.width,c.height);
+    draft={base:c,t:new Date()};$('#fbtn').textContent='📷 Ulangi Foto';pvUpdate();
+  }catch(e){alert('Foto gagal diproses: '+(e&&e.message||e))}
+}
+function pvUpdate(){
+  if(!draft)return;
+  const c=wm(draft.base,wmLines(run,run.recs.length+1,$('#ket').value.trim(),draft.t)),pv=$('#pv');
+  pv.width=c.width;pv.height=c.height;pv.getContext('2d').drawImage(c,0,0);pv.style.display='block';
+}
+
+/* ---------- Galeri ---------- */
+const GF=[['all','Semua'],['blok','Blok'],['jenis','Jenis Sensus'],['tgl','Tanggal'],['baris','Baris'],['arah','Arah Masuk'],['no','Pokok ke-'],['estate','Estate'],['afd','Afdeling'],['petugas','Petugas'],['ket','Keterangan foto']];
+async function galView(){
+  try{galData=(await pAll()).sort((a,b)=>b.t.localeCompare(a.t))}catch(e){galData=[]}
+  show('Galeri Foto','',`${tabs('gal')}
+  <div class="card"><label style="margin-top:0">Cari berdasarkan</label>
+  <select onchange="gf.f=this.value;gf.q='';const q=$('#gq');q.type=gf.f=='tgl'?'date':'text';q.value='';galGrid()">${GF.map(([k,l])=>`<option value="${k}" ${gf.f==k?'selected':''}>${l}</option>`).join('')}</select>
+  <input id="gq" type="${gf.f=='tgl'?'date':'text'}" value="${E(gf.q)}" placeholder="Ketik kata kunci…" style="margin-top:8px" oninput="gf.q=this.value;galGrid()"></div>
+  <div id="gc" class="m" style="margin-bottom:8px"></div><div id="gg" class="grid"></div>`);
+  galGrid();
+}
+function galGrid(){
+  gU.forEach(u=>URL.revokeObjectURL(u));gU=[];
+  const q=gf.q.trim().toLowerCase();
+  const list=galData.filter(p=>!q||(gf.f=='all'?[p.blok,p.jenis,p.tgl,p.baris,p.arah,p.estate,p.afd,p.petugas,'pokok '+p.no,p.ket].join(' '):String(p[gf.f]??'')).toLowerCase().includes(q));
+  $('#gc').textContent=`${list.length} foto`+(list.length!=galData.length?` dari ${galData.length}`:'');
+  $('#gg').innerHTML=list.map((p,i)=>`<div class="cell" onclick="go('photo','${p.id}')"><img data-i="${i}" alt=""><div class="cap"><b>Blok ${E(p.blok)} · Pokok ${p.no}</b><br>${E(p.jenis)}<br>${E(p.tgl)}</div></div>`).join('')||'<p class="m">Belum ada foto.</p>';
+  document.querySelectorAll('#gg img').forEach(im=>{const u=URL.createObjectURL(list[im.dataset.i].th);gU.push(u);im.src=u});
+}
+async function photoView(id){
+  if(!galData.length)try{galData=await pAll()}catch(e){}
+  const p=galData.find(x=>x.id==id);
+  if(!p){alert('Foto tidak ditemukan.');history.back();return}
+  show('Foto Pokok '+p.no,`Blok ${p.blok}`,`<div class="card"><img id="pimg" alt="" style="width:100%;border-radius:8px">
+  <div class="m" style="margin-top:8px">${E(p.jenis)}\nTanggal: ${E(p.tgl)} · ${E(fmtDT(new Date(p.t)))}\nEstate ${E(p.estate)} · Afdeling ${E(p.afd)} · Blok ${E(p.blok)}\nBaris ${E(p.baris)} · Arah ${E(p.arah)} · Pokok ${p.no}\nPetugas: ${E(p.petugas)}${p.ket?'\nKet: '+E(p.ket):''}</div>
+  <div class="row"><button class="b" onclick="sharePhoto('${p.id}')">Share</button><button class="b" style="background:var(--r)" onclick="delPhoto('${p.id}')">Hapus</button></div></div>`,{back:1});
+  const u=URL.createObjectURL(p.blob);gU.push(u);$('#pimg').src=u;
+}
+async function sharePhoto(id){
+  const p=galData.find(x=>x.id==id);
+  try{
+    const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.readAsDataURL(p.blob)});
+    const name=`foto_${slug(p.blok)}_pokok${p.no}_${p.id}.jpg`,r=await plug('Filesystem').writeFile({path:name,data:b64,directory:'CACHE'});
+    await plug('Share').share({title:name,text:`${p.jenis} - Blok ${p.blok} - Pokok ${p.no}`,files:[r.uri],dialogTitle:'Bagikan Foto'});
+  }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan foto: '+(e&&e.message||e))}
+}
+async function delPhoto(id){
+  if(!confirm('Hapus foto ini? Tidak bisa dikembalikan.'))return;
+  await pDel(id);galData=galData.filter(x=>x.id!=id);history.back();
 }
 
 /* ---------- Mulai ---------- */
 go('home',0,true);
 gpsInit();
+luxInit();
 </script>
 </body>
 </html>
