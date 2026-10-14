@@ -46,6 +46,13 @@ h2{margin:0 0 4px}
 .cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#ddd}
 .cap{padding:6px 8px;font-size:12px}
 .pv{width:100%;border-radius:8px;margin-top:8px}
+.ov{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.dlg{background:#fff;border-radius:14px;padding:16px;width:100%;max-width:420px}
+.dlg p{margin:0 0 14px}
+.dbt{display:flex;gap:8px}
+.dbt .b{flex:1;padding:10px 8px;font-size:13px}
+.dbt .b:first-child{flex:0 0 auto;padding:10px 14px}
+.fr{border:1px solid #dfe6dc;border-radius:10px;padding:10px;margin-top:10px}
 </style>
 </head>
 <body>
@@ -81,6 +88,7 @@ const slug=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/
 let gU=[],draft=null,galData=[],gf={f:'all',q:''},lxRaw=null,lxK=+L('luxk',1)||1,stk=[],va=null,sessions=L('sessions',[]),customs=L('customs',[]),hdr=L('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
 const plug=n=>{const C=window.Capacitor;if(!C)return null;return(C.Plugins&&C.Plugins[n])||(C.registerPlugin?C.registerPlugin(n):null)};
 const find=id=>sessions.find(s=>s.id==id);
+const un=s=>s.def.u||'Pokok',ul=s=>un(s).toLowerCase(),lab=f=>f.l+(f.s?` (${f.s})`:'');
 const title=s=>s.def.n+(s.extra?' – '+s.extra:'');
 const hinfo=s=>{const h=s.h;return `Tanggal: ${h.tgl}\nEstate: ${h.estate}\nAfdeling: ${h.afd}\nBlok: ${h.blok}\nBaris: ${h.baris}\nArah Masuk: ${h.arah}\nPetugas: ${h.petugas}`};
 
@@ -123,7 +131,7 @@ function go(v,a,np){
 }
 onpopstate=()=>{
   if(!stk.length)return;
-  if(view=='run'&&!confirm('Keluar dari halaman sensus? Pokok yang sudah di-Next tetap tersimpan dan bisa dilanjutkan dari Riwayat.')){history.pushState({},'');return}
+  if(view=='run'&&!confirm('Keluar dari halaman sensus? '+un(run)+' yang sudah di-Next tetap tersimpan dan bisa dilanjutkan dari Riwayat.')){history.pushState({},'');return}
   const [v,a]=stk.pop();go(v,a,true);
 };
 
@@ -164,7 +172,7 @@ function mulai(){
   if(sel.type=='custom'){def=customs.find(x=>x.id==sel.cid)||customs[0];if(!def)return alert('Buat sensus custom dulu.')}
   else def=TYPES[sel.type];
   if(sel.type=='hama'){extra=sel.jenis==HAMA[HAMA.length-1]?$('#jx').value.trim():sel.jenis;if(!extra)return alert('Ketik jenis hama / penyakit.')}
-  const s={id:Date.now(),type:sel.type,def:{n:def.n,f:def.f},h,extra,recs:[],done:false};
+  const s={id:Date.now(),type:sel.type,def:{n:def.n,f:def.f,u:def.u},h,extra,recs:[],done:false};
   sessions.unshift(s);S('sessions',sessions);go('run',s.id);
 }
 
@@ -173,7 +181,7 @@ function formHTML(def,d={}){
   fdef=def;
   return def.f.map(f=>{
     const v=d[f.k];let h='';
-    if(f.t=='num')h=`<label>${E(f.l)}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0">`;
+    if(f.t=='num')h=`<label>${E(lab(f))}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0">`;
     else if(f.t=='text')h=`<label>${E(f.l)}</label><input name="${f.k}" value="${E(v??'')}">`;
     else if(f.t=='bbc')h=`<label>${E(f.l)}</label><input type="number" inputmode="numeric" min="0" name="${f.k}" value="${E(v??'')}" placeholder="0"><label class="opt"><input type="checkbox" name="${f.k}_nf" ${d[f.k+'_nf']?'checked':''}> Tidak ditemukan</label>`;
     else{
@@ -206,11 +214,11 @@ function runPage(id){
   const s=run,n=s.recs.length+1;
   pg=cur?{...cur}:{lat:'',lon:'',acc:''};pg.lux=luxVal();draft=null;
   show(title(s),`Blok ${s.h.blok} · ${s.h.petugas}`,`
-  <div class="card"><h2>Pokok No. ${n}</h2>
+  <div class="card"><h2>${E(un(s))} No. ${n}</h2>
   <div id="co" class="m"></div>
-  <div class="row"><button class="b gray" style="padding:8px" onclick="if(cur)pg={...cur};pg.lux=luxVal();coUi()">Ambil ulang koordinat &amp; lux</button></div>
+  <div class="row"><button class="b gray" style="padding:8px" onclick="if(cur)pg={...cur};pg.lux=luxVal();coUi();pvUpdate()">Ambil ulang koordinat &amp; lux</button></div>
   ${formHTML(s.def)}</div>
-  <div class="card"><b>Foto Pokok</b>
+  <div class="card"><b>Foto ${E(un(s))}</b>
   <div class="row"><button id="fbtn" class="b" onclick="ambilFoto()">📷 Ambil Foto</button></div>
   <canvas id="pv" class="pv" style="display:none"></canvas>
   <label>Keterangan foto</label><input id="ket" placeholder="Keterangan foto (opsional)" oninput="pvUpdate()"></div>`,
@@ -224,22 +232,33 @@ async function saveCur(){
   s.recs.push({no,lat:pg.lat,lon:pg.lon,acc:pg.acc,lux:pg.lux,t:new Date().toISOString(),d});
   S('sessions',sessions);
   if(!draft)return;
-  const c=wm(draft.base,wmLines(s,no,ket,draft.t)),k=320/Math.max(c.width,c.height),tc=document.createElement('canvas');
+  const c=wm(draft.base,wmLines(s,no,ket,draft.t,pg)),k=320/Math.max(c.width,c.height),tc=document.createElement('canvas');
   tc.width=Math.round(c.width*k);tc.height=Math.round(c.height*k);tc.getContext('2d').drawImage(c,0,0,tc.width,tc.height);
   const blob=await cb(c,.85),th=await cb(tc,.7),h=s.h;
-  await pPut({id:s.id+'_'+no,sid:s.id,no,t:draft.t.toISOString(),tgl:h.tgl,jenis:title(s),estate:h.estate,afd:h.afd,blok:h.blok,baris:h.baris,arah:h.arah,petugas:h.petugas,ket,blob,th});
+  await pPut({id:s.id+'_'+no,sid:s.id,no,t:draft.t.toISOString(),tgl:h.tgl,jenis:title(s),unit:un(s),estate:h.estate,afd:h.afd,blok:h.blok,baris:h.baris,arah:h.arah,petugas:h.petugas,ket,blob,th});
 }
 async function nxt(){lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}runPage()}
+function ask3(msg){
+  return new Promise(res=>{
+    const o=document.createElement('div');o.className='ov';
+    o.innerHTML=`<div class="dlg"><p>${E(msg)}</p><div class="dbt"><button class="b gray" data-v="cancel">Cancel</button><button class="b" data-v="save">Ya, simpan juga yang sedang tampil</button><button class="b" style="background:var(--r)" data-v="skip">Ya, jangan simpan yang sedang tampil</button></div></div>`;
+    o.onclick=e=>{const v=e.target.dataset&&e.target.dataset.v;if(v){o.remove();res(v)}};
+    document.body.appendChild(o);
+  });
+}
 async function fin(){
-  if(!confirm(`Selesaikan sensus? Pokok No. ${run.recs.length+1} yang sedang tampil juga akan disimpan.`))return;
-  lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}
+  const c=await ask3(`Selesaikan sensus? ${un(run)} No. ${run.recs.length+1} sedang tampil.`);
+  if(c=='cancel')return;
+  lock();
+  if(c=='save'){try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}}
+  if(!run.recs.length){sessions=sessions.filter(x=>x!==run);S('sessions',sessions);stk.pop();go('home',0,true);return}
   run.done=true;S('sessions',sessions);go('rekap',run.id,true);
 }
 
 /* ---------- Rekap ---------- */
 function rekapVerif(s){
   const n=s.recs.length,r2=x=>Math.round(x*100)/100,v=(r,k)=>+r.d[k]||0;
-  const vt=s.recs.reduce((a,r)=>a+v(r,'hitung'),0),vp=n?vt/n:0,R=[['Jumlah pokok',n]];
+  const vt=s.recs.reduce((a,r)=>a+v(r,'hitung'),0),vp=n?vt/n:0,R=[['Jumlah '+ul(s),n]];
   const B=[1,2,3].map(k=>{const f=s.recs.filter(r=>!r.d['bbc'+k+'_nf']),t=f.reduce((a,r)=>a+v(r,'bbc'+k),0);return{k,t,c:f.length,p:f.length?t/f.length:0}});
   R.push(['Total JJG','']);B.forEach(b=>R.push(['BBC'+b.k,b.t]));R.push(['Verifikasi',vt]);
   R.push(['JJG/PKK','']);B.forEach(b=>R.push(['BBC'+b.k,b.c?r2(b.p):'-']));R.push(['Verifikasi',r2(vp)]);
@@ -253,11 +272,11 @@ function rekapLines(s){
 }
 function rekapBase(s){
   if(s.type=='verif')return rekapVerif(s);
-  const n=s.recs.length,R=[['Jumlah pokok',n]];
+  const n=s.recs.length,R=[['Jumlah '+ul(s),n]];
   const p=(a,b)=>b?(a/b*100).toFixed(1)+'%':'-',r2=x=>Math.round(x*100)/100;
   for(const f of s.def.f){
     const v=s.recs.map(r=>r.d[f.k]);
-    if(f.t=='num'){const t=v.reduce((a,b)=>a+(+b||0),0);R.push(['Total '+f.l,r2(t)],['Rata-rata/pokok '+f.l,n?r2(t/n):0])}
+    if(f.t=='num'){const t=v.reduce((a,b)=>a+(+b||0),0);R.push(['Total '+lab(f),r2(t)],['Rata-rata/'+ul(s)+' '+lab(f),n?r2(t/n):0])}
     else if(f.t=='sel')for(const o of f.o){const c=v.filter(x=>x==o).length;R.push([o,`${c} (${p(c,n)})`])}
     else if(f.t=='yn'){const c=v.filter(x=>x=='Ya').length;R.push([f.l+' = Ya',`${c} (${p(c,n)})`])}
   }
@@ -271,12 +290,12 @@ function rekapView(id){
   <div class="card"><b>${E(title(s))}</b><div class="m">${E(hinfo(s))}</div>
   <table>${rekapLines(s).map(([l,v])=>v===''?`<tr><td colspan="2"><b>${E(l)}</b></td></tr>`:`<tr><td>${E(l)}</td><td class="r">${E(v)}</td></tr>`).join('')}</table></div>
   <div class="card"><div class="row"><button class="b" onclick="shareTxt(${id})">Share Rekap (WA Text)</button><button class="b" onclick="shareCSV(${id})">Share CSV (WA)</button></div></div>
-  <div class="card"><b>Koreksi Data</b>${s.recs.map(r=>`<div class="item"><span><b>Pokok ${r.no}</b> · ${E(summ(s,r))}</span><button class="b" onclick="go('edit','${s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`,
+  <div class="card"><b>Koreksi Data</b>${s.recs.map(r=>`<div class="item"><span><b>${E(un(s))} ${r.no}</b> · ${E(summ(s,r))}</span><button class="b" onclick="go('edit','${s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`,
   {back:1});
 }
 function editView(a){
   const [id,no]=a.split(':'),s=find(id),r=s.recs[no-1];
-  show('Koreksi Pokok '+no,title(s),`<div class="card"><div class="m">📍 ${(+r.lat).toFixed(6)}, ${(+r.lon).toFixed(6)}</div>${formHTML(s.def,r.d)}</div>`,
+  show('Koreksi '+un(s)+' '+no,title(s),`<div class="card"><div class="m">📍 ${(+r.lat).toFixed(6)}, ${(+r.lon).toFixed(6)}</div>${formHTML(s.def,r.d)}</div>`,
   {back:1,bar:`<button class="b gray" onclick="history.back()">BATAL</button><button class="b" onclick="saveEdit('${id}',${no})">SIMPAN</button>`});
   vis();
 }
@@ -287,8 +306,8 @@ function saveEdit(id,no){
 
 /* ---------- CSV & Share WA ---------- */
 function csv(s){
-  const h=s.h,cols=['tanggal','estate','afdeling','blok','baris','arah_masuk','petugas','jenis_sensus','no_pokok','latitude','longitude','akurasi_m','lux','waktu'];
-  const fk=[];for(const f of s.def.f){fk.push([f.k,slug(f.l)]);if(f.t=='bbc')fk.push([f.k+'_nf',slug(f.l)+'_tdk_ditemukan'])}
+  const h=s.h,cols=['tanggal','estate','afdeling','blok','baris','arah_masuk','petugas','jenis_sensus','no_'+slug(un(s)),'latitude','longitude','akurasi_m','lux','waktu'];
+  const fk=[];for(const f of s.def.f){fk.push([f.k,slug(lab(f))]);if(f.t=='bbc')fk.push([f.k+'_nf',slug(f.l)+'_tdk_ditemukan'])}
   const q=x=>{x=String(x??'');return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x};
   const rows=[cols.concat(fk.map(x=>x[1]))].concat(s.recs.map(r=>
     [h.tgl,h.estate,h.afd,h.blok,h.baris,h.arah,h.petugas,title(s),r.no,r.lat,r.lon,r.acc!==''?(+r.acc).toFixed(1):'',r.lux??'',r.t]
@@ -311,7 +330,7 @@ async function shareCSV(id){
 /* ---------- Riwayat ---------- */
 function histView(){
   show('Riwayat Data','',sessions.length?sessions.map(s=>`<div class="card"><b>${E(title(s))}</b>
-  <div class="m">${E(s.h.tgl)} · Blok ${E(s.h.blok)} · ${s.recs.length} pokok · ${s.done?'Selesai':'Belum selesai'}</div>
+  <div class="m">${E(s.h.tgl)} · Blok ${E(s.h.blok)} · ${s.recs.length} ${ul(s)} · ${s.done?'Selesai':'Belum selesai'}</div>
   <div class="row"><button class="b" onclick="go('rekap',${s.id})">Rekap</button>${s.done?'':`<button class="b" style="background:#f57c00" onclick="go('run',${s.id})">Lanjutkan</button>`}<button class="b" style="background:var(--r)" onclick="del(${s.id})">Hapus</button></div></div>`).join(''):'<p class="m">Belum ada data.</p>',{back:1});
 }
 function del(id){
@@ -320,21 +339,36 @@ function del(id){
 }
 
 /* ---------- Sensus custom ---------- */
+const newCd=()=>({n:'',u:'Pokok',f:[{l:'',t:'num',x:''}]});
+let cd=newCd();
+const CT=[['num','Angka'],['text','Teks'],['yn','Ya / Tidak'],['sel','Pilihan (opsi sendiri)']];
 function customView(){
   show('Sensus Custom','',`
   <div class="card"><b>Tambah Sensus Custom</b>
-  <label>Nama Sensus</label><input id="cn" placeholder="mis. Sensus Pelepah">
-  <label>Kolom isian (satu baris = satu kolom). Tambahkan :angka, :teks atau :yatidak di belakang nama. Tanpa tambahan = angka.</label>
-  <textarea id="cf" placeholder="Jumlah pelepah\nCatatan:teks\nAda buah?:yatidak"></textarea>
-  <div class="row"><button class="b" onclick="saveCustom()">Simpan</button></div></div>
-  <div class="card"><b>Sensus Custom Tersimpan</b>${customs.map(c=>`<div class="item"><span>${E(c.n)} (${c.f.length} kolom)</span><button class="b" style="background:var(--r)" onclick="delCustom(${c.id})">Hapus</button></div>`).join('')||'<p class="m">Belum ada.</p>'}</div>`,{back:1});
+  <label>Nama Sensus</label><input value="${E(cd.n)}" oninput="cd.n=this.value" placeholder="mis. Sensus Pelepah">
+  <label>Unit yang diukur (data dicatat per apa)</label><input value="${E(cd.u)}" oninput="cd.u=this.value" placeholder="mis. Pokok, Baris, Titik, Piringan">
+  <div id="cf"></div>
+  <div class="row"><button class="b gray" onclick="cd.f.push({l:'',t:'num',x:''});cfRows()">+ Tambah Kolom</button></div>
+  <div class="row"><button class="b" onclick="saveCustom()">Simpan Sensus</button></div></div>
+  <div class="card"><b>Sensus Custom Tersimpan</b>${customs.map(c=>`<div class="item"><span>${E(c.n)}<br><small class="m">per ${E(c.u||'Pokok')} · ${c.f.length} kolom</small></span><button class="b" style="background:var(--r)" onclick="delCustom(${c.id})">Hapus</button></div>`).join('')||'<p class="m">Belum ada.</p>'}</div>`,{back:1});
+  cfRows();
+}
+function cfRows(){
+  $('#cf').innerHTML=cd.f.map((f,i)=>`<div class="fr">
+  <div style="display:flex;align-items:center"><b style="flex:1">Kolom ${i+1}</b>${cd.f.length>1?`<button class="b" style="background:var(--r);padding:6px 12px" onclick="cd.f.splice(${i},1);cfRows()">Hapus</button>`:''}</div>
+  <input placeholder="Nama kolom (mis. Jumlah pelepah)" value="${E(f.l)}" oninput="cd.f[${i}].l=this.value" style="margin-top:6px">
+  <select onchange="cd.f[${i}].t=this.value;cd.f[${i}].x='';cfRows()" style="margin-top:6px">${CT.map(([v,l])=>`<option value="${v}" ${f.t==v?'selected':''}>${l}</option>`).join('')}</select>
+  ${f.t=='num'?`<input placeholder="Satuan ukur, opsional (mis. cm, kg, m)" value="${E(f.x)}" oninput="cd.f[${i}].x=this.value" style="margin-top:6px">`:''}
+  ${f.t=='sel'?`<input placeholder="Opsi dipisah koma (mis. Baik, Sedang, Rusak)" value="${E(f.x)}" oninput="cd.f[${i}].x=this.value" style="margin-top:6px">`:''}</div>`).join('');
 }
 function saveCustom(){
-  const n=$('#cn').value.trim(),ls=$('#cf').value.split('\n').map(x=>x.trim()).filter(Boolean);
-  if(!n||!ls.length)return alert('Isi nama sensus dan minimal 1 kolom.');
-  const T={angka:'num',teks:'text',yatidak:'yn'};
-  const f=ls.map((x,i)=>{const m=x.match(/^(.*):(angka|teks|yatidak)$/i);return{k:'f'+(i+1),l:(m?m[1]:x).trim(),t:T[(m?m[2]:'angka').toLowerCase()]}});
-  const c={id:Date.now(),n,f};customs.push(c);S('customs',customs);sel.cid=c.id;customView();
+  const n=cd.n.trim(),u=cd.u.trim()||'Pokok',fs=cd.f.filter(f=>f.l.trim());
+  if(!n||!fs.length)return alert('Isi nama sensus dan minimal 1 kolom.');
+  const opts=f=>f.x.split(',').map(z=>z.trim()).filter(Boolean);
+  const bad=fs.find(f=>f.t=='sel'&&opts(f).length<2);
+  if(bad)return alert(`Kolom "${bad.l}": isi minimal 2 opsi, dipisah koma.`);
+  const f=fs.map((x,i)=>{const o={k:'f'+(i+1),l:x.l.trim(),t:x.t};if(x.t=='num'&&x.x.trim())o.s=x.x.trim();if(x.t=='sel')o.o=opts(x);return o});
+  const c={id:Date.now(),n,u,f};customs.push(c);S('customs',customs);sel.cid=c.id;cd=newCd();customView();
 }
 function delCustom(id){
   if(!confirm('Hapus sensus custom ini? Data hasil sensus yang sudah ada tetap aman.'))return;
@@ -388,7 +422,7 @@ const pPut=r=>tx('readwrite',s=>s.put(r)),pAll=()=>tx('readonly',s=>s.getAll()),
 /* ---------- Foto: ambil & watermark ---------- */
 const p2=n=>String(n).padStart(2,'0');
 const fmtDT=d=>`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
-const wmLines=(s,no,ket,t)=>[fmtDT(t),title(s),`Blok ${s.h.blok} · Baris ${s.h.baris} · Arah ${s.h.arah}`,`Pokok ke-${no}`].concat(ket?['Ket: '+ket]:[]);
+const wmLines=(s,no,ket,t,g)=>[fmtDT(t),title(s),`Blok ${s.h.blok} · Baris ${s.h.baris} · Arah ${s.h.arah}`,`${un(s)} ke-${no}`,g&&g.lat!==''?`Koordinat: ${(+g.lat).toFixed(6)}, ${(+g.lon).toFixed(6)}`:'Koordinat: -',`Lux: ${g&&g.lux!==''&&g.lux!=null?g.lux:'-'}`].concat(ket?['Ket: '+ket]:[]);
 function wm(base,lines){
   const c=document.createElement('canvas');c.width=base.width;c.height=base.height;
   const x=c.getContext('2d');x.drawImage(base,0,0);
@@ -422,12 +456,12 @@ async function ambilFoto(){
 }
 function pvUpdate(){
   if(!draft)return;
-  const c=wm(draft.base,wmLines(run,run.recs.length+1,$('#ket').value.trim(),draft.t)),pv=$('#pv');
+  const c=wm(draft.base,wmLines(run,run.recs.length+1,$('#ket').value.trim(),draft.t,pg)),pv=$('#pv');
   pv.width=c.width;pv.height=c.height;pv.getContext('2d').drawImage(c,0,0);pv.style.display='block';
 }
 
 /* ---------- Galeri ---------- */
-const GF=[['all','Semua'],['blok','Blok'],['jenis','Jenis Sensus'],['tgl','Tanggal'],['baris','Baris'],['arah','Arah Masuk'],['no','Pokok ke-'],['estate','Estate'],['afd','Afdeling'],['petugas','Petugas'],['ket','Keterangan foto']];
+const GF=[['all','Semua'],['blok','Blok'],['jenis','Jenis Sensus'],['tgl','Tanggal'],['baris','Baris'],['arah','Arah Masuk'],['no','Nomor urut'],['estate','Estate'],['afd','Afdeling'],['petugas','Petugas'],['ket','Keterangan foto']];
 async function galView(){
   try{galData=(await pAll()).sort((a,b)=>b.t.localeCompare(a.t))}catch(e){galData=[]}
   show('Galeri Foto','',`${tabs('gal')}
@@ -440,17 +474,17 @@ async function galView(){
 function galGrid(){
   gU.forEach(u=>URL.revokeObjectURL(u));gU=[];
   const q=gf.q.trim().toLowerCase();
-  const list=galData.filter(p=>!q||(gf.f=='all'?[p.blok,p.jenis,p.tgl,p.baris,p.arah,p.estate,p.afd,p.petugas,'pokok '+p.no,p.ket].join(' '):String(p[gf.f]??'')).toLowerCase().includes(q));
+  const list=galData.filter(p=>!q||(gf.f=='all'?[p.blok,p.jenis,p.tgl,p.baris,p.arah,p.estate,p.afd,p.petugas,(p.unit||'Pokok')+' '+p.no,p.ket].join(' '):String(p[gf.f]??'')).toLowerCase().includes(q));
   $('#gc').textContent=`${list.length} foto`+(list.length!=galData.length?` dari ${galData.length}`:'');
-  $('#gg').innerHTML=list.map((p,i)=>`<div class="cell" onclick="go('photo','${p.id}')"><img data-i="${i}" alt=""><div class="cap"><b>Blok ${E(p.blok)} · Pokok ${p.no}</b><br>${E(p.jenis)}<br>${E(p.tgl)}</div></div>`).join('')||'<p class="m">Belum ada foto.</p>';
+  $('#gg').innerHTML=list.map((p,i)=>`<div class="cell" onclick="go('photo','${p.id}')"><img data-i="${i}" alt=""><div class="cap"><b>Blok ${E(p.blok)} · ${E(p.unit||'Pokok')} ${p.no}</b><br>${E(p.jenis)}<br>${E(p.tgl)}</div></div>`).join('')||'<p class="m">Belum ada foto.</p>';
   document.querySelectorAll('#gg img').forEach(im=>{const u=URL.createObjectURL(list[im.dataset.i].th);gU.push(u);im.src=u});
 }
 async function photoView(id){
   if(!galData.length)try{galData=await pAll()}catch(e){}
   const p=galData.find(x=>x.id==id);
   if(!p){alert('Foto tidak ditemukan.');history.back();return}
-  show('Foto Pokok '+p.no,`Blok ${p.blok}`,`<div class="card"><img id="pimg" alt="" style="width:100%;border-radius:8px">
-  <div class="m" style="margin-top:8px">${E(p.jenis)}\nTanggal: ${E(p.tgl)} · ${E(fmtDT(new Date(p.t)))}\nEstate ${E(p.estate)} · Afdeling ${E(p.afd)} · Blok ${E(p.blok)}\nBaris ${E(p.baris)} · Arah ${E(p.arah)} · Pokok ${p.no}\nPetugas: ${E(p.petugas)}${p.ket?'\nKet: '+E(p.ket):''}</div>
+  show('Foto '+(p.unit||'Pokok')+' '+p.no,`Blok ${p.blok}`,`<div class="card"><img id="pimg" alt="" style="width:100%;border-radius:8px">
+  <div class="m" style="margin-top:8px">${E(p.jenis)}\nTanggal: ${E(p.tgl)} · ${E(fmtDT(new Date(p.t)))}\nEstate ${E(p.estate)} · Afdeling ${E(p.afd)} · Blok ${E(p.blok)}\nBaris ${E(p.baris)} · Arah ${E(p.arah)} · ${E(p.unit||'Pokok')} ${p.no}\nPetugas: ${E(p.petugas)}${p.ket?'\nKet: '+E(p.ket):''}</div>
   <div class="row"><button class="b" onclick="sharePhoto('${p.id}')">Share</button><button class="b" style="background:var(--r)" onclick="delPhoto('${p.id}')">Hapus</button></div></div>`,{back:1});
   const u=URL.createObjectURL(p.blob);gU.push(u);$('#pimg').src=u;
 }
@@ -458,8 +492,8 @@ async function sharePhoto(id){
   const p=galData.find(x=>x.id==id);
   try{
     const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.readAsDataURL(p.blob)});
-    const name=`foto_${slug(p.blok)}_pokok${p.no}_${p.id}.jpg`,r=await plug('Filesystem').writeFile({path:name,data:b64,directory:'CACHE'});
-    await plug('Share').share({title:name,text:`${p.jenis} - Blok ${p.blok} - Pokok ${p.no}`,files:[r.uri],dialogTitle:'Bagikan Foto'});
+    const name=`foto_${slug(p.blok)}_${slug(p.unit||'pokok')}${p.no}_${p.id}.jpg`,r=await plug('Filesystem').writeFile({path:name,data:b64,directory:'CACHE'});
+    await plug('Share').share({title:name,text:`${p.jenis} - Blok ${p.blok} - ${p.unit||'Pokok'} ${p.no}`,files:[r.uri],dialogTitle:'Bagikan Foto'});
   }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan foto: '+(e&&e.message||e))}
 }
 async function delPhoto(id){
