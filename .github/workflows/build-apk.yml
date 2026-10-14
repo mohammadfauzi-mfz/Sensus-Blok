@@ -28,6 +28,84 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Add native code (lux sensor)
+        run: |
+          D=android/app/src/main/java/com/bimapalma/sensusblok
+          cat > $D/LightSensorPlugin.java <<'EOF'
+          package com.bimapalma.sensusblok;
+
+          import android.content.Context;
+          import android.hardware.Sensor;
+          import android.hardware.SensorEvent;
+          import android.hardware.SensorEventListener;
+          import android.hardware.SensorManager;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "LightSensor")
+          public class LightSensorPlugin extends Plugin implements SensorEventListener {
+              private SensorManager sm;
+              private volatile float last = -1f;
+
+              @PluginMethod
+              public void start(PluginCall call) {
+                  sm = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
+                  Sensor light = sm.getDefaultSensor(Sensor.TYPE_LIGHT);
+                  if (light == null) {
+                      call.reject("Sensor cahaya tidak tersedia di HP ini");
+                      return;
+                  }
+                  sm.unregisterListener(this);
+                  sm.registerListener(this, light, SensorManager.SENSOR_DELAY_UI);
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void stop(PluginCall call) {
+                  if (sm != null) sm.unregisterListener(this);
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void getLux(PluginCall call) {
+                  JSObject o = new JSObject();
+                  o.put("available", last >= 0);
+                  o.put("lux", (double) last);
+                  call.resolve(o);
+              }
+
+              @Override
+              public void onSensorChanged(SensorEvent e) {
+                  last = e.values[0];
+              }
+
+              @Override
+              public void onAccuracyChanged(Sensor s, int a) {}
+
+              @Override
+              protected void handleOnDestroy() {
+                  if (sm != null) sm.unregisterListener(this);
+              }
+          }
+          EOF
+          cat > $D/MainActivity.java <<'EOF'
+          package com.bimapalma.sensusblok;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(LightSensorPlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          EOF
+
       - name: Generate app icons
         run: npx @capacitor/assets generate --android
 
