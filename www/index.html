@@ -89,11 +89,11 @@ const HL={tgl:'Tanggal Sensus',estate:'Estate',afd:'Afdeling',blok:'Blok',baris:
 
 const $=s=>document.querySelector(s);
 const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
+const LS=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
 const S=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const slug=x=>String(x).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-let LM=null,LL=null,userL=null,mapRec=null,mv=null,ref={lat:0,lon:0},mf={map:'',jenis:'',by:'jenis',blok:'',tgl:'',ph:true,me:true},gU=[],draft=null,galData=[],gf={f:'all',q:''},lxRaw=null,lxK=+L('luxk',1)||1,stk=[],va=null,sessions=L('sessions',[]),customs=L('customs',[]),hdr=L('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
+let LM=null,LL=null,userL=null,mapRec=null,mv=null,ref={lat:0,lon:0},mf={map:'',jenis:'',by:'jenis',blok:'',tgl:'',ph:true,me:true},gU=[],draft=null,galData=[],gf={f:'all',q:''},lxRaw=null,lxK=+LS('luxk',1)||1,stk=[],va=null,sessions=LS('sessions',[]),customs=LS('customs',[]),hdr=LS('hdr',{}),view='home',cur=null,pg=null,run=null,fdef=null,sel={type:'pokok',jenis:HAMA[0],cid:''};
 const plug=n=>{const C=window.Capacitor;if(!C)return null;return(C.Plugins&&C.Plugins[n])||(C.registerPlugin?C.registerPlugin(n):null)};
 const find=id=>sessions.find(s=>s.id==id);
 const un=s=>s.def.u||'Pokok',ul=s=>un(s).toLowerCase(),lab=f=>f.l+(f.s?` (${f.s})`:'');
@@ -395,7 +395,7 @@ function aboutView(){
       <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#25D366"/><path d="M32 11C20.4 11 11 20.4 11 32c0 3.8 1 7.3 2.8 10.4L11 53l10.9-2.8A20.9 20.9 0 0 0 32 53c11.6 0 21-9.4 21-21S43.6 11 32 11z" fill="none" stroke="#fff" stroke-width="3"/><path d="M24 22c-1 3 1 8 6 12s9 6 12 5l2-4-5-3-3 2c-2-1-5-3-6-6l2-3-3-5z" fill="#fff"/></svg>
     </a>
   </div>
-  <p class="m center" style="margin-top:40px">Versi Aplikasi 1.2</p>`,{back:1});
+  <p class="m center" style="margin-top:40px">Versi Aplikasi 1.2.1</p>`,{back:1});
 }
 
 /* ---------- Tab ---------- */
@@ -645,6 +645,7 @@ async function renderGeoPdf(buf,geo,name){
   if(err>0.02*Math.max(w,h))throw new Error('Georeferensi PDF tidak konsisten (galat '+Math.round(err)+' px).');
   const ppm=(Math.hypot(aff[1],aff[4])/110574+Math.hypot(aff[0],aff[3])/(111320*Math.cos(lat0*Math.PI/180)))/2;
   const blob=await cb(oc,.85);c.width=0;oc.width=0;
+  if(!blob)throw new Error('Gagal membuat gambar peta (memori HP tidak cukup). Coba PDF yang lebih kecil.');
   return {id:'m'+Date.now(),name,blob,w,h,aff,ppm,t:new Date().toISOString()};
 }
 function impMap(){
@@ -747,7 +748,7 @@ function drawPts(fit){
     L.marker(xy(q.la,q.lo),{icon:L.divIcon({className:'',html:'<div class="ph">📷</div>',iconSize:[26,26],iconAnchor:[13,32]})}).addTo(LL)
      .bindPopup(()=>{const u=URL.createObjectURL(q.ph.th);gU.push(u);return `<img src="${u}" style="width:160px;border-radius:6px"><br>${E(q.ph.jenis)}<br>${E(q.ph.unit||'Pokok')} ${q.ph.no}${q.ph.ket?'<br>'+E(q.ph.ket):''}<div style="margin-top:6px"><button class="b" style="padding:6px 12px" onclick="go('photo','${q.ph.id}')">Buka foto</button></div>`});
   });
-  $('#leg').innerHTML=`<b>Legenda · ${E($('#mby').selectedOptions[0]?$('#mby').selectedOptions[0].text:'')}</b>`+(cz.leg.map(([c,l,n])=>`<div style="margin-top:4px"><span class="dot" style="background:${c}"></span>${E(l)} <span class="m">(${n})</span></div>`).join('')||'<div class="m">Belum ada data bertitik koordinat untuk filter ini.</div>')+`<div class="m" style="margin-top:6px">${pts.length} titik sensus · ${nph} foto</div>`;
+  $('#leg').innerHTML=`<b>Legenda · ${E($('#mby').selectedOptions[0]?$('#mby').selectedOptions[0].text:'')}</b>`+(cz.leg.map(([c,l,n])=>`<div style="margin-top:4px"><span class="dot" style="background:${c}"></span>${E(l)} <span class="m">(${n})</span></div>`).join('')||'<div class="m">Belum ada data bertitik koordinat untuk filter ini.</div>')+`<div class="m" style="margin-top:6px">${pts.length} titik sensus · ${nph} foto</div>`+mapInfo(pts);
   userDraw();
   if(fit){
     if(mv&&mv.id==mf.map)LM.setView(mv.c,mv.z,{animate:false});
@@ -757,6 +758,20 @@ function drawPts(fit){
     else LM.setView(cur?xy(cur.lat,cur.lon):[0,0],cur?2:0);
   }
 }
+function mapInfo(pts){
+  if(!mapRec)return'';
+  const [a,b,c,d,e,f]=mapRec.aff,det=a*e-b*d,inv=(u,v)=>[(e*(u-c)-b*(v-f))/det,(a*(v-f)-d*(u-c))/det];
+  const cs=[[0,0],[mapRec.w,0],[mapRec.w,mapRec.h],[0,mapRec.h]].map(([u,v])=>inv(u,v)),lo=cs.map(q=>q[0]),la=cs.map(q=>q[1]);
+  const out=pts.filter(p=>{const q=xy(p.la,p.lo);return q.lng<0||q.lng>mapRec.w||q.lat<0||q.lat>mapRec.h}).length;
+  return `<div class="m" style="margin-top:6px">Cakupan peta: lat ${Math.min(...la).toFixed(4)} s/d ${Math.max(...la).toFixed(4)}, lon ${Math.min(...lo).toFixed(4)} s/d ${Math.max(...lo).toFixed(4)}${out?`\n⚠ ${out} titik sensus berada di luar area peta ini`:''}</div>`;
+}
+function toPts(){
+  const B=mapPts().map(p=>xy(p.la,p.lo));
+  if(B.length>1)LM.fitBounds(L.latLngBounds(B).pad(.2));
+  else if(B.length)LM.setView(B[0],Math.max(LM.getZoom(),1));
+  else toMap();
+}
+function toMap(){if(mapRec)LM.fitBounds([[0,0],[mapRec.h,mapRec.w]])}
 function userDraw(){
   if(!LM)return;
   if(userL){LM.removeLayer(userL);userL=null}
@@ -788,15 +803,18 @@ async function mapView(){
   </div>
   <label class="opt"><input type="checkbox" ${mf.ph?'checked':''} onchange="mfSet('ph',this.checked)"> Tampilkan foto</label>
   <label class="opt"><input type="checkbox" ${mf.me?'checked':''} onchange="mf.me=this.checked;userDraw()"> Tampilkan posisi saya</label>
-  <div class="row"><button class="b gray" onclick="toMe()">📍 Ke posisi saya</button></div></details>
+  <div class="row"><button class="b gray" onclick="toMe()">📍 Posisi saya</button><button class="b gray" onclick="toPts()">🔍 Data</button><button class="b gray" onclick="toMap()">🗺 Peta</button></div></details>
   <div id="mp" style="height:62vh;min-height:320px;border-radius:12px;overflow:hidden;background:#e8ece6"></div>
   <div id="leg" class="card" style="margin-top:12px"></div>`);
   byOpts();
+  if(mapRec&&!(mapRec.blob instanceof Blob)){$('#mp').innerHTML='<div class="card">Gambar peta rusak. Hapus peta ini lalu impor ulang.</div>';return}
+  try{
   LM=L.map('mp',{crs:L.CRS.Simple,minZoom:-7,maxZoom:5,zoomSnap:.25,attributionControl:false,preferCanvas:true});
   LL=L.layerGroup().addTo(LM);
   if(mapRec){const u=URL.createObjectURL(mapRec.blob);gU.push(u);L.imageOverlay(u,[[0,0],[mapRec.h,mapRec.w]]).addTo(LM)}
   drawPts(true);
   LM.on('moveend',()=>{if(LM)mv={id:mf.map,c:LM.getCenter(),z:LM.getZoom()}});
+  }catch(e){$('#leg').innerHTML='<b>Peta gagal ditampilkan</b><div class="m">'+E(e&&e.message||e)+'</div>'}
 }
 
 /* ---------- Mulai ---------- */
