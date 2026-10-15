@@ -8,7 +8,9 @@
     "@capacitor/core": "^7.0.0",
     "@capacitor/filesystem": "^7.0.0",
     "@capacitor/geolocation": "^7.0.0",
-    "@capacitor/share": "^7.0.0"
+    "@capacitor/share": "^7.0.0",
+    "leaflet": "1.9.4",
+    "pdfjs-dist": "4.10.38"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0"
