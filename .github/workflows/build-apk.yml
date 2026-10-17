@@ -122,6 +122,28 @@ jobs:
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <application#' android/app/src/main/AndroidManifest.xml
 
+      - name: Kunci penandatangan tetap + nomor versi (agar update tidak perlu uninstall)
+        run: |
+          echo "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" | base64 -d > android/sensusblok.keystore
+          cat > android/app/signing.gradle <<'EOF'
+          android {
+              signingConfigs {
+                  sensus {
+                      storeFile file("${rootDir}/sensusblok.keystore")
+                      storeType 'pkcs12'
+                      storePassword 'sensusblok'
+                      keyAlias 'sensusblok'
+                      keyPassword 'sensusblok'
+                  }
+              }
+              buildTypes {
+                  debug { signingConfig signingConfigs.sensus }
+              }
+          }
+          EOF
+          echo "apply from: 'signing.gradle'" >> android/app/build.gradle
+          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.7"/' android/app/build.gradle
+
       - name: Build debug APK
         run: |
           cd android
