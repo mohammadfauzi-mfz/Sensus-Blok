@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -32,15 +35,18 @@ jobs:
           cp -r node_modules/pdfjs-dist/standard_fonts www/lib/standard_fonts
           cp -r node_modules/pdfjs-dist/cmaps www/lib/cmaps
 
+      - name: Tanamkan nama repository (untuk update otomatis di aplikasi)
+        run: sed -i "s#__REPO__#${{ github.repository }}#" www/index.html
+
       - name: Generate Android project
         run: |
           npx cap add android
           npx cap sync android
 
-      - name: Add native code (lux sensor)
+      - name: Add native code (sensor lux, log crash, update, optimasi baterai)
         run: |
           D=android/app/src/main/java/com/bimapalma/sensusblok
-          cat > $D/LightSensorPlugin.java <<'EOF'
+          cat > $D/LightSensorPlugin.java <<'JAVAEOF'
           package com.bimapalma.sensusblok;
 
           import android.content.Context;
@@ -99,8 +105,8 @@ jobs:
                   if (sm != null) sm.unregisterListener(this);
               }
           }
-          EOF
-          cat > $D/MainActivity.java <<'EOF'
+          JAVAEOF
+          cat > $D/MainActivity.java <<'JAVAEOF'
           package com.bimapalma.sensusblok;
 
           import android.os.Bundle;
@@ -110,17 +116,305 @@ jobs:
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   registerPlugin(LightSensorPlugin.class);
+                  registerPlugin(SensusNativePlugin.class);
+                  SensusNativePlugin.installCrashHandler(this);
                   super.onCreate(savedInstanceState);
               }
           }
-          EOF
+          JAVAEOF
+          cat > $D/SensusNativePlugin.java <<'JAVAEOF'
+          package com.bimapalma.sensusblok;
+
+          import android.app.ActivityManager;
+          import android.app.ApplicationExitInfo;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageInfo;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.PowerManager;
+          import android.provider.Settings;
+          import androidx.core.content.FileProvider;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.FileWriter;
+          import java.io.InputStream;
+          import java.io.PrintWriter;
+          import java.io.RandomAccessFile;
+          import java.io.StringWriter;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.Date;
+          import java.util.List;
+
+          @CapacitorPlugin(name = "SensusNative")
+          public class SensusNativePlugin extends Plugin {
+              static volatile long dlDone = 0;
+              static volatile long dlTotal = 0;
+              static volatile String dlState = "idle";
+              static volatile String dlErr = "";
+
+              public static void installCrashHandler(final Context ctx) {
+                  final Thread.UncaughtExceptionHandler old = Thread.getDefaultUncaughtExceptionHandler();
+                  Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+                      @Override
+                      public void uncaughtException(Thread t, Throwable e) {
+                          try {
+                              StringWriter sw = new StringWriter();
+                              e.printStackTrace(new PrintWriter(sw));
+                              File f = new File(ctx.getFilesDir(), "crash.log");
+                              if (f.exists() && f.length() > 200000) f.delete();
+                              FileWriter w = new FileWriter(f, true);
+                              w.write("=== CRASH " + System.currentTimeMillis() + " | " + new Date() + " thread=" + t.getName() + " ===\n" + sw + "\n");
+                              w.close();
+                          } catch (Throwable x) {
+                          }
+                          if (old != null) old.uncaughtException(t, e);
+                      }
+                  });
+              }
+
+              private static String readTail(File f, int max) {
+                  try {
+                      if (!f.exists()) return "";
+                      RandomAccessFile r = new RandomAccessFile(f, "r");
+                      long len = r.length();
+                      long start = Math.max(0L, len - max);
+                      r.seek(start);
+                      byte[] b = new byte[(int) (len - start)];
+                      r.readFully(b);
+                      r.close();
+                      return new String(b, "UTF-8");
+                  } catch (Exception e) {
+                      return "(gagal membaca: " + e + ")";
+                  }
+              }
+
+              private static String reasonName(int r) {
+                  switch (r) {
+                      case 1: return "EXIT_SELF";
+                      case 2: return "SIGNALED";
+                      case 3: return "LOW_MEMORY";
+                      case 4: return "CRASH";
+                      case 5: return "CRASH_NATIVE";
+                      case 6: return "ANR";
+                      case 7: return "INITIALIZATION_FAILURE";
+                      case 8: return "PERMISSION_CHANGE";
+                      case 9: return "EXCESSIVE_RESOURCE_USAGE";
+                      case 10: return "USER_REQUESTED";
+                      case 11: return "USER_STOPPED";
+                      case 12: return "DEPENDENCY_DIED";
+                      case 13: return "OTHER";
+                      case 14: return "FREEZER";
+                      case 15: return "PACKAGE_STATE_CHANGE";
+                      case 16: return "PACKAGE_UPDATED";
+                      default: return String.valueOf(r);
+                  }
+              }
+
+              @PluginMethod
+              public void getInfo(PluginCall call) {
+                  JSObject o = new JSObject();
+                  Context c = getContext();
+                  try {
+                      PackageInfo pi = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
+                      o.put("versionName", pi.versionName);
+                      o.put("versionCode", Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : (long) pi.versionCode);
+                  } catch (Exception e) {
+                  }
+                  o.put("sdk", Build.VERSION.SDK_INT);
+                  o.put("model", Build.MANUFACTURER + " " + Build.MODEL);
+                  o.put("brand", Build.MANUFACTURER);
+                  PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                  o.put("ignoringBattery", Build.VERSION.SDK_INT < 23 || pm.isIgnoringBatteryOptimizations(c.getPackageName()));
+                  o.put("canInstall", Build.VERSION.SDK_INT < 26 || c.getPackageManager().canRequestPackageInstalls());
+                  ActivityManager am = (ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+                  ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+                  am.getMemoryInfo(mi);
+                  o.put("totalMem", mi.totalMem);
+                  o.put("availMem", mi.availMem);
+                  o.put("lowMem", mi.lowMemory);
+                  call.resolve(o);
+              }
+
+              @PluginMethod
+              public void readLog(PluginCall call) {
+                  JSObject o = new JSObject();
+                  o.put("crash", readTail(new File(getContext().getFilesDir(), "crash.log"), 60000));
+                  StringBuilder sb = new StringBuilder();
+                  if (Build.VERSION.SDK_INT >= 30) {
+                      try {
+                          ActivityManager am = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+                          List<ApplicationExitInfo> l = am.getHistoricalProcessExitReasons(getContext().getPackageName(), 0, 12);
+                          for (ApplicationExitInfo i : l) {
+                              sb.append(i.getTimestamp()).append(" | ").append(new Date(i.getTimestamp())).append(" | reason=").append(reasonName(i.getReason()))
+                                .append("  status=").append(i.getStatus()).append("  importance=").append(i.getImportance())
+                                .append("  ").append(i.getDescription()).append("\n");
+                          }
+                      } catch (Exception e) {
+                          sb.append("(gagal membaca exit info: ").append(e).append(")\n");
+                      }
+                  }
+                  o.put("exits", sb.toString());
+                  call.resolve(o);
+              }
+
+              @PluginMethod
+              public void clearLog(PluginCall call) {
+                  new File(getContext().getFilesDir(), "crash.log").delete();
+                  call.resolve();
+              }
+
+              private void launch(Intent i) {
+                  i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                  getContext().startActivity(i);
+              }
+
+              @PluginMethod
+              public void requestIgnoreBattery(PluginCall call) {
+                  try {
+                      launch(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName())));
+                  } catch (Exception e) {
+                      try {
+                          launch(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                      } catch (Exception e2) {
+                      }
+                  }
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void openBatterySettings(PluginCall call) {
+                  try {
+                      launch(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                  } catch (Exception e) {
+                  }
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void openAppSettings(PluginCall call) {
+                  try {
+                      launch(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())));
+                  } catch (Exception e) {
+                  }
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void download(final PluginCall call) {
+                  final String url = call.getString("url");
+                  final String token = call.getString("token");
+                  dlDone = 0;
+                  dlTotal = 0;
+                  dlState = "run";
+                  dlErr = "";
+                  new Thread(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              String u = url;
+                              HttpURLConnection c;
+                              int hops = 0;
+                              while (true) {
+                                  c = (HttpURLConnection) new URL(u).openConnection();
+                                  c.setInstanceFollowRedirects(false);
+                                  c.setConnectTimeout(15000);
+                                  c.setReadTimeout(30000);
+                                  c.setRequestProperty("Accept", "application/octet-stream");
+                                  c.setRequestProperty("User-Agent", "SensusBlok");
+                                  if (token != null && token.length() > 0 && u.startsWith("https://api.github.com")) {
+                                      c.setRequestProperty("Authorization", "Bearer " + token);
+                                  }
+                                  int code = c.getResponseCode();
+                                  if (code >= 300 && code < 400 && hops++ < 6) {
+                                      u = c.getHeaderField("Location");
+                                      c.disconnect();
+                                      continue;
+                                  }
+                                  if (code != 200) throw new Exception("HTTP " + code);
+                                  break;
+                              }
+                              dlTotal = c.getContentLengthLong();
+                              File f = new File(getContext().getCacheDir(), "update.apk");
+                              InputStream in = c.getInputStream();
+                              FileOutputStream out = new FileOutputStream(f);
+                              byte[] buf = new byte[65536];
+                              int n;
+                              while ((n = in.read(buf)) > 0) {
+                                  out.write(buf, 0, n);
+                                  dlDone += n;
+                              }
+                              out.close();
+                              in.close();
+                              dlState = "ok";
+                              JSObject r = new JSObject();
+                              r.put("size", dlDone);
+                              call.resolve(r);
+                          } catch (Exception e) {
+                              dlState = "err";
+                              dlErr = String.valueOf(e);
+                              call.reject("Unduh gagal: " + e);
+                          }
+                      }
+                  }).start();
+              }
+
+              @PluginMethod
+              public void dlStatus(PluginCall call) {
+                  JSObject o = new JSObject();
+                  o.put("done", dlDone);
+                  o.put("total", dlTotal);
+                  o.put("state", dlState);
+                  o.put("err", dlErr);
+                  call.resolve(o);
+              }
+
+              @PluginMethod
+              public void installApk(PluginCall call) {
+                  Context c = getContext();
+                  try {
+                      File f = new File(c.getCacheDir(), "update.apk");
+                      if (!f.exists()) {
+                          call.reject("Berkas update tidak ditemukan");
+                          return;
+                      }
+                      JSObject o = new JSObject();
+                      if (Build.VERSION.SDK_INT >= 26 && !c.getPackageManager().canRequestPackageInstalls()) {
+                          launch(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + c.getPackageName())));
+                          o.put("needPermission", true);
+                          call.resolve(o);
+                          return;
+                      }
+                      Uri uri = FileProvider.getUriForFile(c, c.getPackageName() + ".fileprovider", f);
+                      Intent i = new Intent(Intent.ACTION_VIEW);
+                      i.setDataAndType(uri, "application/vnd.android.package-archive");
+                      i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      launch(i);
+                      call.resolve(o);
+                  } catch (Exception e) {
+                      call.reject("Gagal memulai pemasangan: " + e);
+                  }
+              }
+          }
+          JAVAEOF
 
       - name: Generate app icons
         run: npx @capacitor/assets generate --android
 
-      - name: Add location permissions
+      - name: Izin di AndroidManifest
         run: |
-          sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <application#' android/app/src/main/AndroidManifest.xml
+          M=android/app/src/main/AndroidManifest.xml
+          for P in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION REQUEST_INSTALL_PACKAGES REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+            sed -i "/<application/i \    <uses-permission android:name=\"android.permission.$P\" />" $M
+          done
+          grep -n "uses-permission" $M
 
       - name: Kunci penandatangan tetap + nomor versi (agar update tidak perlu uninstall)
         run: |
@@ -142,7 +436,7 @@ jobs:
           }
           EOF
           echo "apply from: 'signing.gradle'" >> android/app/build.gradle
-          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.7"/' android/app/build.gradle
+          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.9"/' android/app/build.gradle
 
       - name: Build debug APK
         run: |
@@ -155,3 +449,16 @@ jobs:
         with:
           name: SensusBlok-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Siapkan berkas rilis
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk SensusBlok-build${{ github.run_number }}.apk
+
+      - name: Publikasikan rilis (dipakai fitur update otomatis)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Sensus Blok build ${{ github.run_number }} (v1.9)
+          body: ${{ github.event.head_commit.message || 'Pembaruan aplikasi' }}
+          files: SensusBlok-build${{ github.run_number }}.apk
+          make_latest: true
