@@ -132,6 +132,7 @@ jobs:
 
           import android.app.Activity;
           import android.app.ActivityManager;
+          import android.content.ClipData;
           import android.content.Context;
           import android.content.Intent;
           import android.database.Cursor;
@@ -147,6 +148,8 @@ jobs:
           import android.provider.OpenableColumns;
           import android.util.Base64;
           import androidx.activity.result.ActivityResult;
+          import androidx.core.content.FileProvider;
+          import com.getcapacitor.JSArray;
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
@@ -158,6 +161,7 @@ jobs:
           import java.io.FileOutputStream;
           import java.io.InputStream;
           import java.io.OutputStream;
+          import java.util.ArrayList;
           import java.util.concurrent.Executors;
           import java.util.concurrent.ScheduledExecutorService;
           import java.util.concurrent.TimeUnit;
@@ -292,6 +296,49 @@ jobs:
               public void clearOpened(PluginCall call) {
                   new File(dir(), "open_file").delete();
                   call.resolve();
+              }
+
+              /**
+               * Bagikan berkas (foto/xlsx/csv) lewat Intent Android langsung, sehingga WhatsApp menerima lampirannya.
+               * paths: daftar path/URI file di cache aplikasi; mime: tipe berkas ("image/*", dst.).
+               */
+              @PluginMethod
+              public void shareFiles(PluginCall call) {
+                  try {
+                      JSArray arr = call.getArray("paths");
+                      String text = call.getString("text");
+                      String title = call.getString("title", "Bagikan");
+                      String mime = call.getString("mime", "*/*");
+                      Context c = getContext();
+                      ArrayList<Uri> uris = new ArrayList<Uri>();
+                      for (int k = 0; k < arr.length(); k++) {
+                          String p = arr.getString(k);
+                          if (p.startsWith("file://")) p = Uri.parse(p).getPath();
+                          File f = new File(p);
+                          if (!f.exists() || f.length() == 0) throw new Exception("Berkas lampiran tidak ditemukan: " + f.getName());
+                          uris.add(FileProvider.getUriForFile(c, c.getPackageName() + ".fileprovider", f));
+                      }
+                      if (uris.isEmpty()) throw new Exception("Tidak ada berkas untuk dibagikan.");
+                      Intent i = new Intent(uris.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
+                      i.setType(mime);
+                      if (uris.size() > 1) i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                      else i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+                      if (text != null && text.length() > 0) i.putExtra(Intent.EXTRA_TEXT, text);
+                      ClipData cd = ClipData.newRawUri("", uris.get(0));
+                      for (int k = 1; k < uris.size(); k++) cd.addItem(new ClipData.Item(uris.get(k)));
+                      i.setClipData(cd);
+                      i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      Intent ch = Intent.createChooser(i, title);
+                      ch.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      if (getActivity() != null) getActivity().startActivity(ch);
+                      else {
+                          ch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          c.startActivity(ch);
+                      }
+                      call.resolve();
+                  } catch (Throwable t) {
+                      call.reject(msg(t));
+                  }
               }
 
               /** Getar singkat (umpan balik tombol NEXT). */
