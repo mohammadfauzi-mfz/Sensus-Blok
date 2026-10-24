@@ -105,6 +105,7 @@ jobs:
           cat > $D/MainActivity.java <<'JAVAEOF'
           package com.bimapalma.sensusblok;
 
+          import android.content.Intent;
           import android.os.Bundle;
           import com.getcapacitor.BridgeActivity;
 
@@ -116,6 +117,13 @@ jobs:
                   registerPlugin(PdfMapPlugin.class);
                   SensusNativePlugin.installCrashHandler(this);
                   super.onCreate(savedInstanceState);
+                  PdfMapPlugin.handleIntent(this, getIntent());
+              }
+
+              @Override
+              protected void onNewIntent(Intent intent) {
+                  super.onNewIntent(intent);
+                  PdfMapPlugin.handleIntent(this, intent);
               }
           }
           JAVAEOF
@@ -132,7 +140,10 @@ jobs:
           import android.graphics.Matrix;
           import android.graphics.pdf.PdfRenderer;
           import android.net.Uri;
+          import android.os.Build;
           import android.os.ParcelFileDescriptor;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
           import android.provider.OpenableColumns;
           import android.util.Base64;
           import androidx.activity.result.ActivityResult;
@@ -164,6 +175,139 @@ jobs:
               private ParcelFileDescriptor pfd;
               private String openKey = "";
               private volatile long lastUse = 0;
+
+              // ---- berkas yang dibuka dari aplikasi lain (WhatsApp "Buka dengan" / Bagikan) ----
+              private static volatile PdfMapPlugin inst = null;
+              private static volatile String pPath = null, pName = null, pMime = null;
+              private static volatile long pSize = 0;
+
+              @Override
+              public void load() {
+                  inst = this;
+              }
+
+              /** Dipanggil MainActivity (onCreate / onNewIntent). Menyalin berkas ke penyimpanan aplikasi di thread latar. */
+              public static void handleIntent(final Context c, Intent i) {
+                  if (i == null) return;
+                  String a = i.getAction();
+                  Uri u = null;
+                  if (Intent.ACTION_VIEW.equals(a)) u = i.getData();
+                  else if (Intent.ACTION_SEND.equals(a)) {
+                      Object o = i.getParcelableExtra(Intent.EXTRA_STREAM);
+                      if (o instanceof Uri) u = (Uri) o;
+                  }
+                  if (u == null) return;
+                  i.setAction(Intent.ACTION_MAIN);   // agar tidak diproses ulang saat activity dibuat ulang
+                  i.setData(null);
+                  final Uri uri = u;
+                  new Thread(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              String mime = c.getContentResolver().getType(uri);
+                              String name = uri.getLastPathSegment();
+                              Cursor q = null;
+                              try {
+                                  q = c.getContentResolver().query(uri, null, null, null, null);
+                                  if (q != null && q.moveToFirst()) {
+                                      int k = q.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                                      if (k >= 0 && q.getString(k) != null) name = q.getString(k);
+                                  }
+                              } catch (Exception e) {
+                              } finally {
+                                  if (q != null) q.close();
+                              }
+                              File d = new File(c.getFilesDir(), "pdfmap");
+                              d.mkdirs();
+                              File out = new File(d, "open_file");
+                              long n = 0;
+                              InputStream in = c.getContentResolver().openInputStream(uri);
+                              if (in == null) return;
+                              OutputStream os = new FileOutputStream(out);
+                              try {
+                                  byte[] b = new byte[262144];
+                                  int k;
+                                  while ((k = in.read(b)) > 0) {
+                                      os.write(b, 0, k);
+                                      n += k;
+                                  }
+                              } finally {
+                                  try { os.close(); } catch (Exception e) { }
+                                  try { in.close(); } catch (Exception e) { }
+                              }
+                              pPath = out.getAbsolutePath();
+                              pName = name == null ? "berkas" : name;
+                              pMime = mime == null ? "" : mime;
+                              pSize = n;
+                              PdfMapPlugin p = inst;
+                              if (p != null) {
+                                  JSObject o = new JSObject();
+                                  o.put("name", pName);
+                                  p.notifyListeners("fileOpened", o);
+                              }
+                          } catch (Throwable t) {
+                          }
+                      }
+                  }).start();
+              }
+
+              @PluginMethod
+              public void takeOpened(PluginCall call) {
+                  JSObject o = new JSObject();
+                  if (pPath != null) {
+                      o.put("has", true);
+                      o.put("path", pPath);
+                      o.put("name", pName);
+                      o.put("mime", pMime);
+                      o.put("size", pSize);
+                      pPath = null;
+                  } else {
+                      o.put("has", false);
+                  }
+                  call.resolve(o);
+              }
+
+              /** Jadikan berkas yang dibuka sebagai berkas impor peta (src "tmp"). */
+              @PluginMethod
+              public void adopt(final PluginCall call) {
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              closeDoc();
+                              File t = fileFor("tmp"), f = new File(dir(), "open_file");
+                              if (t.exists()) t.delete();
+                              if (!f.renameTo(t)) throw new Exception("Berkas yang dibuka tidak ditemukan.");
+                              JSObject o = new JSObject();
+                              o.put("path", t.getAbsolutePath());
+                              call.resolve(o);
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              @PluginMethod
+              public void clearOpened(PluginCall call) {
+                  new File(dir(), "open_file").delete();
+                  call.resolve();
+              }
+
+              /** Getar singkat (umpan balik tombol NEXT). */
+              @PluginMethod
+              public void buzz(PluginCall call) {
+                  try {
+                      Vibrator v = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                      int ms = call.getInt("ms", 40);
+                      if (v != null && v.hasVibrator()) {
+                          if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+                          else v.vibrate(ms);
+                      }
+                  } catch (Throwable t) {
+                  }
+                  call.resolve();
+              }
 
               private File dir() {
                   File d = new File(getContext().getFilesDir(), "pdfmap");
@@ -749,10 +893,21 @@ jobs:
       - name: Izin di AndroidManifest
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          for P in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION REQUEST_INSTALL_PACKAGES REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; do
+          for P in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION REQUEST_INSTALL_PACKAGES REQUEST_IGNORE_BATTERY_OPTIMIZATIONS VIBRATE; do
             sed -i "/<application/i \    <uses-permission android:name=\"android.permission.$P\" />" $M
           done
           grep -n "uses-permission" $M
+          # "Buka dengan" / Bagikan dari WhatsApp & aplikasi lain (GeoPDF, gambar, backup, data tim, layer GIS)
+          cat > /tmp/filters.xml <<'XMLEOF'
+          <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><data android:scheme="content"/><data android:scheme="file"/><data android:mimeType="application/pdf"/><data android:mimeType="image/*"/><data android:mimeType="application/json"/><data android:mimeType="application/zip"/><data android:mimeType="application/x-zip-compressed"/><data android:mimeType="application/octet-stream"/><data android:mimeType="application/vnd.google-earth.kml+xml"/><data android:mimeType="application/vnd.google-earth.kmz"/><data android:mimeType="application/gpx+xml"/><data android:mimeType="application/geo+json"/><data android:mimeType="text/csv"/><data android:mimeType="text/comma-separated-values"/><data android:mimeType="text/xml"/><data android:mimeType="application/xml"/><data android:mimeType="text/plain"/></intent-filter><intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/pdf"/><data android:mimeType="image/*"/><data android:mimeType="application/json"/><data android:mimeType="application/zip"/><data android:mimeType="application/x-zip-compressed"/><data android:mimeType="application/octet-stream"/><data android:mimeType="application/vnd.google-earth.kml+xml"/><data android:mimeType="application/vnd.google-earth.kmz"/><data android:mimeType="application/gpx+xml"/><data android:mimeType="application/geo+json"/><data android:mimeType="text/csv"/><data android:mimeType="text/comma-separated-values"/><data android:mimeType="text/xml"/><data android:mimeType="application/xml"/><data android:mimeType="text/plain"/></intent-filter>
+          XMLEOF
+          python3 - <<'PYEOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          i = s.index('</activity>')
+          open(p, 'w', encoding='utf-8').write(s[:i] + open('/tmp/filters.xml', encoding='utf-8').read() + s[i:])
+          PYEOF
+          grep -c "intent-filter" $M
 
       - name: Kunci penandatangan tetap + nomor versi (agar update tidak perlu uninstall)
         run: |
