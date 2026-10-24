@@ -369,7 +369,7 @@ async function shareCSV(id){
   const s=find(id),name=`sensus_${slug(title(s))}_${slug(s.h.blok)}_${ftg(s)}.csv`;
   try{
     const r=await plug('Filesystem').writeFile({path:name,data:csv(s),directory:'CACHE',encoding:'utf8'});
-    await plug('Share').share({title:name,files:[r.uri],dialogTitle:'Bagikan CSV'});
+    await sendFiles([r.uri],'', 'Bagikan CSV','text/csv');
   }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan CSV: '+(e&&e.message||e))}
 }
 
@@ -514,8 +514,19 @@ async function shareXlsx(id){
     busy('Menyiapkan berkas…');
     const uri=await writeBig(FS,name,bytes);
     busy();
-    await SH.share({title:name,text:waText(s)+(failed.length?`\n(Foto ${failed.join(', ')} tidak dapat disisipkan)`:''),files:[uri],dialogTitle:'Bagikan Excel'});
+    await sendFiles([uri],waText(s)+(failed.length?`\n(Foto ${failed.join(', ')} tidak dapat disisipkan)`:''),'Bagikan Excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Gagal membuat Excel: '+(e&&e.message||e))}
+}
+
+/* kirim berkas lewat Intent native (lampiran WhatsApp pasti ikut); cadangan: plugin Share */
+async function sendFiles(uris,text,title,mime){
+  logE('share',`${uris.length} berkas · ${mime} · ${uris.map(u=>String(u).split('/').pop()).join(', ')}`);
+  const N=PM();
+  if(N){
+    try{await N.shareFiles({paths:uris,text:text||'',title:title||'Bagikan',mime});return}
+    catch(e){logE('share','native gagal: '+(e&&e.message||e))}
+  }
+  await plug('Share').share({title,text,files:uris,dialogTitle:title});
 }
 
 /* ---------- Riwayat ---------- */
@@ -702,7 +713,7 @@ async function sharePhoto(id){
   try{
     const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.readAsDataURL(p.blob)});
     const name=`foto_${slug(p.blok)}_${slug(p.unit||'pokok')}${p.no}_${p.id}.jpg`,r=await plug('Filesystem').writeFile({path:name,data:b64,directory:'CACHE'});
-    await plug('Share').share({title:name,text:`${p.jenis} - Blok ${p.blok} - ${p.unit||'Pokok'} ${p.no}`,files:[r.uri],dialogTitle:'Bagikan Foto'});
+    await sendFiles([r.uri],`${p.jenis} - Blok ${p.blok} - ${p.unit||'Pokok'} ${p.no}`,'Bagikan Foto','image/jpeg');
   }catch(e){if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan foto: '+(e&&e.message||e))}
 }
 async function delPhoto(id){
@@ -741,7 +752,7 @@ async function shareData(ids){
     }
     const name=`sensus_data_${today()}_${out.sessions.length}sesi.json`;
     const r=await plug('Filesystem').writeFile({path:name,data:JSON.stringify(out),directory:'CACHE',encoding:'utf8'});
-    await plug('Share').share({title:name,files:[r.uri],dialogTitle:'Bagikan Data Tim'});
+    await sendFiles([r.uri],'','Bagikan Data Tim','application/json');
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan data: '+(e&&e.message||e))}
 }
 function impData(){pickFile('*/*',impDataFile)}
@@ -1768,7 +1779,7 @@ async function shareReport(id){
     }
     busy();
     if(!files.length)return shareTxt(id);
-    await SH.share({title:'Laporan sensus',text:waText(s),files,dialogTitle:'Bagikan laporan'});
+    await sendFiles(files,waText(s),'Bagikan laporan','image/*');
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Gagal membuat laporan: '+(e&&e.message||e))}
 }
 
@@ -2230,7 +2241,7 @@ function logE(kind,msg){
 }
 window.addEventListener('error',e=>logE('error',`${e.message} @${String(e.filename||'').split('/').pop()}:${e.lineno}:${e.colno}${e.error&&e.error.stack?' | '+String(e.error.stack).split('\n').slice(0,4).join(' ⏎ '):''}`));
 window.addEventListener('unhandledrejection',e=>logE('promise',e.reason&&e.reason.stack?String(e.reason.stack).split('\n').slice(0,4).join(' ⏎ '):String(e.reason)));
-{const _al=window.alert;window.alert=m=>{logE('alert',m);return _al.call(window,m)};const _ce=console.error;console.error=(...a)=>{logE('console',a.map(String).join(' '));_ce.apply(console,a)}}
+{const _al=window.alert;window.alert=m=>{logE('alert',m);return _al.call(window,m)};const _ce=console.error;console.error=(...a)=>{logE('console',a.map(x=>{try{return x&&typeof x=='object'?JSON.stringify(x,Object.getOwnPropertyNames(x)):String(x)}catch(e){return String(x)}}).join(' '));_ce.apply(console,a)}}
 function lifeInit(){
   const was=LS('run',0),seen=LS('seen',0),vs=LS('vis','');
   if(was)logE('prev-abnormal',`Sesi sebelumnya tidak tercatat keluar normal. Terakhir aktif ${seen?fmtDT(new Date(seen)):'?'} (status: ${vs||'?'}). Kemungkinan ditutup paksa atau dimatikan sistem.`);

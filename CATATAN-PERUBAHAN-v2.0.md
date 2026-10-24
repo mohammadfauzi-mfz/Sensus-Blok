@@ -44,3 +44,10 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
 - Halaman sensus: tombol oranye kecil "↶ Pokok sebelumnya" di kanan judul kartu (jauh dari NEXT).
   Dengan konfirmasi, data + foto pokok terakhir dihapus, isian lama ditampilkan kembali, foto diambil ulang.
   Nonaktif bila belum ada pokok tersimpan.
+
+## Tahap 4 — perbaikan share WA tanpa lampiran
+- Penyebab dugaan: plugin Share bawaan mengirim banyak berkas dengan tipe "*/*" + teks; WhatsApp lalu hanya
+  menerima teks. Sekarang berkas dikirim lewat Intent native (PdfMap.shareFiles: ACTION_SEND/SEND_MULTIPLE,
+  tipe image/*, xlsx, csv, json yang sesuai, izin baca URI via FileProvider). Dipakai oleh Laporan (peta +
+  kolase), Excel, CSV, Foto, dan Data Tim. Bila native gagal, otomatis kembali ke plugin Share lama.
+- Log diagnosa kini mencatat berkas yang dikirim dan isi error konsol (sebelumnya tampil "[object Object]").
