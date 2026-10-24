@@ -1761,6 +1761,16 @@ async function collageBlobs(s,MAXP){
   }
   return out;
 }
+async function stackBlobs(bl){
+  if(!bl.length)return null;
+  if(bl.length==1)return bl[0];
+  const ims=[];
+  for(const b of bl){const u=URL.createObjectURL(b);try{ims.push(await loadImg(u))}finally{URL.revokeObjectURL(u)}}
+  const W=Math.min(1720,Math.max(...ims.map(i=>i.width))),hs=ims.map(i=>Math.round(i.height*W/i.width)),c=document.createElement('canvas');
+  c.width=W;c.height=hs.reduce((a,b)=>a+b,0);
+  const x=c.getContext('2d');let y=0;ims.forEach((im,k)=>{x.drawImage(im,0,y,W,hs[k]);y+=hs[k]});
+  const out=await cb(c,.86);c.width=0;return out;
+}
 async function shareReport(id){
   const s=find(id),FS=plug('Filesystem'),SH=plug('Share');
   if(!s)return alert('Data tidak ditemukan.');
@@ -1768,15 +1778,17 @@ async function shareReport(id){
   try{
     const sidl=s.ids||[s.id],np=(await pAll()).filter(p=>sidl.includes(p.sid)).length;
     let withPh=false;
-    if(np){const c=await pickOpt(`Lampiran laporan (${np} foto tersedia)`,['Peta tracking saja','Peta tracking + kolase maks 3 foto sampel']);if(c<0)return;withPh=c==1}
+    if(np){const c=await pickOpt(`Lampiran laporan (${np} foto tersedia)`,['Peta tracking saja','Peta tracking + kolase maks 3 foto sampel (1 gambar)']);if(c<0)return;withPh=c==1}
     const files=[],tag=`${slug(title(s))}_${slug(s.h.blok)}_${ftg(s)}`,save=async(b,n)=>{const r=await FS.writeFile({path:n,data:await toB64(b),directory:'CACHE'});files.push(r.uri)};
     busy('Membuat peta tracking…');
-    const mb=await areaBlob(s);if(mb)await save(mb,`tracking_${tag}.jpg`);
+    const mb=await areaBlob(s);
     if(withPh){
       busy('Membuat kolase foto sampel…');
       const cols=await collageBlobs(s,3);
-      for(let i=0;i<cols.length;i++)await save(cols[i],`foto_sampel_${tag}_${i+1}.jpg`);
-    }
+      /* satu gambar saja (peta di atas, kolase di bawah): WhatsApp tidak andal menerima beberapa gambar + teks sekaligus */
+      const one=await stackBlobs([mb,...cols].filter(Boolean));
+      if(one)await save(one,`laporan_${tag}.jpg`);
+    }else if(mb)await save(mb,`tracking_${tag}.jpg`);
     busy();
     if(!files.length)return shareTxt(id);
     await sendFiles(files,waText(s),'Bagikan laporan','image/*');

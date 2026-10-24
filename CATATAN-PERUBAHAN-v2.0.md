@@ -51,3 +51,7 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
   tipe image/*, xlsx, csv, json yang sesuai, izin baca URI via FileProvider). Dipakai oleh Laporan (peta +
   kolase), Excel, CSV, Foto, dan Data Tim. Bila native gagal, otomatis kembali ke plugin Share lama.
 - Log diagnosa kini mencatat berkas yang dikirim dan isi error konsol (sebelumnya tampil "[object Object]").
+
+## Tahap 5
+- Laporan dengan kolase kini dikirim sebagai SATU gambar (peta tracking di atas, kolase foto sampel di
+  bawah) + teks, karena WhatsApp gagal menerima 2 gambar sekaligus dengan teks. Tanpa kolase tetap 1 gambar peta.
