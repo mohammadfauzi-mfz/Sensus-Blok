@@ -24,3 +24,23 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
    - Sensor lux: polling 1 detik, UI hanya diperbarui bila nilai berubah berarti, berhenti saat app di latar.
    - Pratinjau foto tidak digambar ulang bila teks watermark tidak berubah.
    - Daftar "Koreksi Data" di rekap menampilkan 100 data terakhir (tombol "Tampilkan semua").
+
+## Tahap 2
+- Share WA (Laporan): lampiran utama = peta tracking (titik sensus + garis jejak sesuai urutan jalan).
+  Opsi tambahan: kolase maks 3 foto sampel (dipilih merata dari seluruh foto).
+- Tombol NEXT: getar singkat (native) + bunyi "tut". Izin VIBRATE ditambahkan di workflow.
+- Koreksi data: tombol merah "HAPUS POKOK" (dengan konfirmasi). Foto ikut terhapus; nomor pokok lain
+  tidak berubah (nomor berikutnya = nomor terbesar + 1) sehingga foto/watermark tetap cocok.
+- Buka dari WhatsApp ("Buka dengan"/Bagikan): GeoPDF, gambar peta, backup .sbk, data tim .json,
+  layer GIS (zip/shp/kml/kmz/gpx/geojson/csv). Berkas dikenali dari ekstensi atau isinya.
+  Intent-filter ditambahkan otomatis oleh workflow ke AndroidManifest.
+- Riwayat: tombol "Rekap" -> "Lihat" (hanya sesi itu). Tab Rekap = data gabungan.
+- Tab Rekap: pilih jenis sensus, blok, tanggal dari/sampai, petugas, baris, arah masuk, estate,
+  afdeling; sesi yang cocok bisa dicentang/dikeluarkan satu per satu.
+- Watermark foto & teks WA memuat "Volume disensus: N pokok" (plus total blok bila ada sesi lain
+  dengan jenis+blok yang sama).
+
+## Tahap 3
+- Halaman sensus: tombol oranye kecil "↶ Pokok sebelumnya" di kanan judul kartu (jauh dari NEXT).
+  Dengan konfirmasi, data + foto pokok terakhir dihapus, isian lama ditampilkan kembali, foto diambil ulang.
+  Nonaktif bila belum ada pokok tersimpan.

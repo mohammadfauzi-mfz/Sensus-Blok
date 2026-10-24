@@ -155,19 +155,31 @@ function readForm(def){
 /* ---------- Halaman sensus (1 halaman = 1 pokok) ---------- */
 function runPage(id){
   if(id)run=find(id);
-  const s=run,n=s.recs.length+1;
+  const s=run,n=nextNo(s);
   pg=cur?{...cur}:{lat:'',lon:'',acc:''};pg.lux=luxVal();pg.hdg=hdg==null?null:Math.round(hdg);draft=null;
   show(title(s),`Blok ${s.h.blok} · ${s.h.petugas}`,`
-  <div class="card"><h2>${E(un(s))} No. ${n}</h2>
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">${E(un(s))} No. ${n}</h2><button class="b" style="background:#f57c00;padding:6px 10px;font-size:12px;width:auto;flex:none;min-height:0;${s.recs.length?'':'opacity:.4'}" ${s.recs.length?'':'disabled'} onclick="backRec()">↶ ${E(un(s))} sebelumnya</button></div>
   <div id="co" class="m"></div>
   <div class="m" style="margin-top:4px">Koordinat &amp; lux terus diperbarui. Nilai akhir diambil saat menekan NEXT / FINISH.</div>
-  ${formHTML(s.def)}</div>
+  ${formHTML(s.def,prefill||{})}</div>
   <div class="card"><b>Foto ${E(un(s))}</b>
   <div class="row"><button id="fbtn" class="b" onclick="ambilFoto()">📷 Ambil Foto</button></div>
   <canvas id="pv" class="pv" style="display:none"></canvas>
   <label>Keterangan foto</label><input id="ket" placeholder="Keterangan foto (opsional)" oninput="pvUpdate()"></div>`,
   {back:1,bar:`<button class="b" style="background:var(--r)" onclick="fin()">FINISH</button><button class="b" onclick="nxt()">NEXT ▶</button>`});
-  coUi();vis();
+  prefill=null;coUi();vis();
+}
+let prefill=null;
+async function backRec(){
+  const s=run;if(!s||!s.recs.length)return;
+  const r=s.recs.reduce((a,b)=>(+b.no>+a.no?b:a)),no=r.no;
+  if(!confirm(`Kembali ke ${un(s)} No. ${no}?\n\nData dan foto ${un(s)} No. ${no} akan DIHAPUS, lalu Anda mengisi ulang (isian lama ditampilkan kembali, foto harus diambil ulang).`))return;
+  lock();
+  prefill=r.d||null;
+  s.recs=s.recs.filter(x=>x!==r);S('sessions',sessions);
+  try{await pDel(s.id+'_'+no)}catch(e){logE('back','foto gagal dihapus: '+(e&&e.message||e))}
+  galData=galData.filter(x=>x.id!=s.id+'_'+no);
+  runPage();
 }
 const cb=(c,q)=>new Promise(r=>c.toBlob(r,'image/jpeg',q));
 const lock=()=>{$('#bar').style.pointerEvents='none'};
@@ -180,16 +192,27 @@ function liveUpdate(){
 }
 async function saveCur(){
   liveUpdate();const g={...pg};
-  const s=run,no=s.recs.length+1,ket=($('#ket')||{value:''}).value.trim(),d=readForm(s.def);
+  const s=run,no=nextNo(s),ket=($('#ket')||{value:''}).value.trim(),d=readForm(s.def);
   s.recs.push({no,lat:g.lat,lon:g.lon,acc:g.acc,lux:g.lux,hdg:g.hdg==null?null:g.hdg,t:new Date().toISOString(),d});
   S('sessions',sessions);
   if(!draft)return;
-  const c=wm(draft.base,wmLines(s,no,ket,draft.t,g)),k=320/Math.max(c.width,c.height),tc=document.createElement('canvas');
+  const c=wm(draft.base,wmLines(s,no,ket,draft.t,g,s.recs.length)),k=320/Math.max(c.width,c.height),tc=document.createElement('canvas');
   tc.width=Math.round(c.width*k);tc.height=Math.round(c.height*k);tc.getContext('2d').drawImage(c,0,0,tc.width,tc.height);
   const blob=await cb(c,.85),th=await cb(tc,.7),h=s.h;
   await pPut({id:s.id+'_'+no,sid:s.id,no,t:draft.t.toISOString(),tgl:h.tgl,jenis:title(s),unit:un(s),lat:g.lat,lon:g.lon,lux:g.lux,hdg:g.hdg==null?null:g.hdg,estate:h.estate,afd:h.afd,blok:h.blok,baris:h.baris,arah:h.arah,petugas:h.petugas,ket,blob,th});
 }
-async function nxt(){lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}runPage()}
+let _ac=null;
+function fb(){   // umpan balik NEXT: getar + bunyi "tut"
+  try{const N=PM();if(N)N.buzz({ms:40}).catch(()=>{try{navigator.vibrate&&navigator.vibrate(40)}catch(e){}});else navigator.vibrate&&navigator.vibrate(40)}catch(e){}
+  try{
+    const A=window.AudioContext||window.webkitAudioContext;if(!A)return;
+    _ac=_ac||new A();if(_ac.state=='suspended')_ac.resume();
+    const o=_ac.createOscillator(),g=_ac.createGain(),t=_ac.currentTime;
+    o.type='square';o.frequency.value=1500;g.gain.setValueAtTime(.2,t);g.gain.exponentialRampToValueAtTime(.001,t+.09);
+    o.connect(g);g.connect(_ac.destination);o.start(t);o.stop(t+.1);
+  }catch(e){}
+}
+async function nxt(){fb();lock();try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}runPage()}
 function ask3(msg){
   return new Promise(res=>{
     const o=document.createElement('div');o.className='ov';
@@ -199,12 +222,12 @@ function ask3(msg){
   });
 }
 async function fin(){
-  const c=await ask3(`Selesaikan sensus? ${un(run)} No. ${run.recs.length+1} sedang tampil.`);
+  const c=await ask3(`Selesaikan sensus? ${un(run)} No. ${nextNo(run)} sedang tampil.`);
   if(c=='cancel')return;
   lock();
   if(c=='save'){try{await saveCur()}catch(e){alert('Foto gagal disimpan: '+(e&&e.message||e))}}
   if(!run.recs.length){sessions=sessions.filter(x=>x!==run);S('sessions',sessions);stk.pop();go('home',0,true);return}
-  run.done=true;S('sessions',sessions);go('rekap',run.id,true);
+  run.done=true;S('sessions',sessions);go('rekap','one:'+run.id,true);
 }
 
 /* ---------- Rekap ---------- */
@@ -234,56 +257,96 @@ function rekapBase(s){
   }
   return R;
 }
-const waText=s=>`*REKAP ${title(s).toUpperCase()}*\n${PT()}\n${hinfo(s)}\n`+rekapLines(s).map(([l,v])=>v===''?`\n*${l}*`:`${l}: ${v}`).join('\n');
+const waText=s=>`*REKAP ${title(s).toUpperCase()}*\n${PT()}\n${hinfo(s)}\n*Volume disensus: ${s.recs.length} ${ul(s)}*\n`+rekapLines(s).map(([l,v])=>v===''?`\n*${l}*`:`${l}: ${v}`).join('\n');
 const summ=(s,r)=>s.def.f.map(f=>f.t=='bbc'&&r.d[f.k+'_nf']?'tdk ditemukan':r.d[f.k]).filter(v=>v!==''&&v!==undefined).join(' · ');
-/* ---------- Rekap gabungan: jenis sensus + blok yang sama digabung jadi satu rekap ---------- */
+/* ---------- Rekap gabungan: pilih jenis sensus + blok (+ filter lain), sesi yang cocok digabung ---------- */
 const nk=x=>String(x||'').trim().toLowerCase().replace(/\s+/g,' ');
-const gKey=s=>'g:'+slug(title(s))+'__'+slug(nk(s.h.blok));
 const uniq=a=>[...new Set(a.map(x=>String(x==null?'':x).trim()).filter(Boolean))];
 const ftg=s=>s.ftgl||s.h.tgl;                    // tanggal aman untuk nama berkas
-function groups(){
-  const m=new Map();
-  for(const s of sessions.slice().sort((a,b)=>a.id-b.id)){const k=gKey(s);if(!m.has(k))m.set(k,[]);m.get(k).push(s)}
-  const out=[];
-  for(const [k,list] of m){
-    const f=list[0],recs=[];
-    list.forEach(s=>s.recs.forEach(r=>recs.push(Object.assign({},r,{_s:s}))));   // salinan: data asli tidak dimodifikasi
-    const tg=uniq(list.map(s=>s.h.tgl)).sort(),j=(key,sep)=>uniq(list.map(s=>s.h[key])).join(sep||', ');
-    out.push({id:k,ids:list.map(s=>s.id),n:list.length,type:f.type,def:f.def,extra:f.extra,done:list.every(s=>s.done),list,recs,
-      h:{...f.h,tgl:tg.length>1?tg[0]+' s.d. '+tg[tg.length-1]:(tg[0]||''),estate:j('estate',' / '),afd:j('afd',' / '),baris:j('baris'),arah:j('arah'),petugas:j('petugas')},
-      ftgl:tg.length>1?tg[0]+'_sd_'+tg[tg.length-1]:(tg[0]||'')});
-  }
-  return out.sort((a,b)=>Math.max(...b.ids)-Math.max(...a.ids));
+const rekF={jenis:'',blok:'',dari:'',sampai:'',petugas:'',baris:'',arah:'',estate:'',afd:''};
+let rekEx={},rekOne=0,rekAll=false;
+const REKX=[['petugas','Petugas'],['baris','Baris'],['arah','Arah masuk'],['estate','Estate'],['afd','Afdeling']];
+function mergeSessions(list,key){
+  const f=list[0],recs=[];
+  list.forEach(s=>s.recs.forEach(r=>recs.push(Object.assign({},r,{_s:s}))));   // salinan: data asli tidak dimodifikasi
+  const tg=uniq(list.map(s=>s.h.tgl)).sort(),j=(k,sep)=>{const m=new Map();list.forEach(s=>{const v=String(s.h[k]||'').trim();if(v&&!m.has(nk(v)))m.set(nk(v),v)});return[...m.values()].join(sep||', ')};
+  return{id:key,ids:list.map(s=>s.id),n:list.length,type:f.type,def:f.def,extra:f.extra,done:list.every(s=>s.done),list,recs,
+    h:{...f.h,tgl:tg.length>1?tg[0]+' s.d. '+tg[tg.length-1]:(tg[0]||''),estate:j('estate',' / '),afd:j('afd',' / '),blok:j('blok'),baris:j('baris'),arah:j('arah'),petugas:j('petugas')},
+    ftgl:tg.length>1?tg[0]+'_sd_'+tg[tg.length-1]:(tg[0]||'')};
 }
-const grpGet=k=>groups().find(g=>g.id==k);
-const find=id=>typeof id=='string'&&id.startsWith('g:')?grpGet(id):sessions.find(s=>s.id==id);
-let rekG='',rekAll=false;
+function rekapSel(){
+  const all=sessions.slice().sort((a,b)=>a.id-b.id),jn=uniq(all.map(title));
+  if(!jn.includes(rekF.jenis))rekF.jenis=jn[0]||'';
+  const base=all.filter(s=>title(s)==rekF.jenis);
+  const ok=s=>(!rekF.blok||nk(s.h.blok)==nk(rekF.blok))&&(!rekF.dari||s.h.tgl>=rekF.dari)&&(!rekF.sampai||s.h.tgl<=rekF.sampai)&&REKX.every(([k])=>!rekF[k]||nk(s.h[k])==nk(rekF[k]));
+  const match=base.filter(ok),use=match.filter(s=>!rekEx[s.id]);
+  const opt=k=>{const m=new Map();base.forEach(s=>{const v=String(s.h[k]||'').trim();if(v&&!m.has(nk(v)))m.set(nk(v),v)});return[...m.values()].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}))};
+  return{jn,base,match,use,opt};
+}
+const find=id=>{
+  if(typeof id=='string'&&id.startsWith('g:')){const u=rekapSel().use;return u.length?mergeSessions(u,id):null}
+  return sessions.find(s=>s.id==id);
+};
+function rekSet(k,v){
+  rekF[k]=v;rekEx={};rekAll=false;
+  if(k=='jenis')Object.keys(rekF).forEach(x=>{if(x!='jenis')rekF[x]=''});
+  rekapView();
+}
+function rekReset(){const j=rekF.jenis;Object.keys(rekF).forEach(x=>rekF[x]='');rekF.jenis=j;rekEx={};rekAll=false;rekapView()}
+function rekTog(id){rekEx[id]=!rekEx[id];rekapView()}
+function lihat(id){rekAll=false;go('rekap','one:'+id,true)}
 function rekapView(key){
-  const G=groups();
-  if(!G.length){show('','',`${tabs('map')}${subtabs('rekap')}<p class="m">Belum ada data sensus.</p>`);return}
-  if(typeof key=='string'&&key.startsWith('g:')){if(key!=rekG)rekAll=false;rekG=key}
-  else if(key&&/^\d+$/.test(String(key))){const s0=sessions.find(x=>x.id==key);if(s0)rekG=gKey(s0)}
-  const g=G.find(x=>x.id==rekG)||G[0];rekG=g.id;
-  const q=`'${g.id}'`,LIM=100,shown=rekAll?g.recs:g.recs.slice(-LIM);
-  show('','',`${tabs('map')}${subtabs('rekap')}
-  <div class="card"><label style="margin-top:0">Pilih rekap (jenis sensus + blok)</label><select onchange="rekapView(this.value)">${G.map(x=>`<option value="${x.id}" ${x.id==g.id?'selected':''}>${E(title(x))} · Blok ${E(x.h.blok)} · ${x.recs.length} ${E(ul(x))}${x.n>1?` · ${x.n} sesi`:''}</option>`).join('')}</select></div>
-  <div class="card"><b>${E(title(g))}</b>${g.n>1?`<div class="m">Gabungan ${g.n} sesi sensus dengan jenis dan blok yang sama</div>`:''}<div class="m">${E(hinfo(g))}</div>
+  const single=typeof key=='string'&&key.startsWith('one:');
+  rekOne=single?+key.slice(4):0;
+  if(!sessions.length){show('','',`${tabs('map')}${subtabs(single?'hist':'rekap')}<p class="m">Belum ada data sensus.</p>`);return}
+  const SEL=single?null:rekapSel();
+  let g;
+  if(single){g=sessions.find(x=>x.id==rekOne);if(!g){rekOne=0;return rekapView()}}
+  else g=SEL.use.length?mergeSessions(SEL.use,'g:cur'):null;
+  const LIM=100,sel1=(k,lbl,cur,opts)=>`<label>${lbl}</label><select onchange="rekSet('${k}',this.value)"><option value="">Semua</option>${opts.map(o=>`<option value="${E(o)}" ${nk(o)==nk(cur)?'selected':''}>${E(o)}</option>`).join('')}</select>`;
+  let head='';
+  if(single)head=`<div class="card"><div class="row" style="margin-top:0"><button class="b gray" onclick="subTab('hist')">← Kembali ke Riwayat</button></div><div class="m" style="margin-top:6px">Menampilkan satu sesi sensus saja.</div></div>`;
+  else{
+    const act=['dari','sampai',...REKX.map(x=>x[0])].some(k=>rekF[k]);
+    head=`<div class="card"><label style="margin-top:0">Jenis sensus</label><select onchange="rekSet('jenis',this.value)">${SEL.jn.map(j=>`<option value="${E(j)}" ${j==rekF.jenis?'selected':''}>${E(j)}</option>`).join('')}</select>
+    ${sel1('blok','Blok',rekF.blok,SEL.opt('blok'))}
+    <details style="margin-top:8px" ${act?'open':''}><summary class="m">Filter lainnya${act?' (aktif)':''}</summary>
+    <label>Tanggal dari</label><input type="date" value="${E(rekF.dari)}" onchange="rekSet('dari',this.value)">
+    <label>Tanggal sampai</label><input type="date" value="${E(rekF.sampai)}" onchange="rekSet('sampai',this.value)">
+    ${REKX.map(([k,l])=>sel1(k,l,rekF[k],SEL.opt(k))).join('')}</details>
+    <div class="row"><button class="b gray" onclick="rekReset()">Reset filter</button></div></div>
+    <div class="card"><b>Sesi yang direkap (${SEL.use.length} dari ${SEL.match.length} sesi cocok)</b><div class="m">Hilangkan centang untuk mengeluarkan sesi tertentu dari rekap.</div>
+    ${SEL.match.map(x=>`<label class="opt"><input type="checkbox" ${rekEx[x.id]?'':'checked'} onchange="rekTog(${x.id})"> ${E(x.h.tgl)} · Blok ${E(x.h.blok)} · Baris ${E(x.h.baris)} · ${E(x.h.petugas)} · ${x.recs.length} ${E(ul(x))}${x.done?'':' · belum selesai'}</label>`).join('')||'<p class="m">Tidak ada sesi yang cocok dengan filter.</p>'}</div>`;
+  }
+  if(!g){show('','',`${tabs('map')}${subtabs('rekap')}${head}`);return}
+  const q=single?String(g.id):`'${g.id}'`,shown=rekAll?g.recs:g.recs.slice(-LIM),rk=single?`'one:${g.id}'`:'';
+  show('','',`${tabs('map')}${subtabs(single?'hist':'rekap')}${head}
+  <div class="card"><b>${E(title(g))}</b>${g.n>1?`<div class="m">Gabungan ${g.n} sesi sensus</div>`:''}
+  <div class="m" style="margin-top:4px"><b>Volume disensus: ${g.recs.length} ${E(ul(g))}</b></div><div class="m">${E(hinfo(g))}</div>
   <table>${rekapLines(g).map(([l,v])=>v===''?`<tr><td colspan="2"><b>${E(l)}</b></td></tr>`:`<tr><td>${E(l)}</td><td class="r">${E(v)}</td></tr>`).join('')}</table></div>
-  ${g.n>1?`<div class="card"><b>Sesi yang digabung</b>${g.list.map(x=>`<div class="item"><span>${E(x.h.tgl)} · Baris ${E(x.h.baris)} · ${E(x.h.petugas)} · ${x.recs.length} ${E(ul(x))}${x.done?'':' · belum selesai'}</span></div>`).join('')}</div>`:''}
   <div class="card"><div class="row" style="margin-top:0"><button class="b" onclick="shareXlsx(${q})">📊 Share Excel + Foto (WA)</button></div>
-  <div class="row"><button class="b" onclick="shareReport(${q})">📤 Share Laporan + Peta + Foto (WA)</button></div>
+  <div class="row"><button class="b" onclick="shareReport(${q})">📤 Share Laporan + Peta Tracking (WA)</button></div>
   <div class="row"><button class="b gray" onclick="shareTxt(${q})">Share Rekap (WA Text)</button><button class="b" onclick="shareCSV(${q})">Share CSV (WA)</button></div>
-  <div class="row"><button class="b gray" onclick="shareData(${JSON.stringify(g.ids)})">Share Data Tim (.json)</button><button class="b gray" onclick="exportDlg('s'+${q})">🗺 Export GIS</button></div></div>
-  <div class="card"><b>Koreksi Data</b>${!rekAll&&g.recs.length>LIM?`<div class="m">Menampilkan ${LIM} data terakhir dari ${g.recs.length}.</div><div class="row"><button class="b gray" onclick="rekAll=true;rekapView()">Tampilkan semua</button></div>`:''}${shown.map(r=>`<div class="item"><span><b>${E(un(g))} ${r.no}</b>${g.n>1?' · '+E(r._s.h.tgl):''} · ${E(summ(g,r))}</span><button class="b" onclick="go('edit','${r._s.id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`);
+  <div class="row"><button class="b gray" onclick="shareData(${JSON.stringify(g.ids||[g.id])})">Share Data Tim (.json)</button><button class="b gray" onclick="exportDlg('s'+${q})">🗺 Export GIS</button></div></div>
+  <div class="card"><b>Koreksi Data</b>${!rekAll&&g.recs.length>LIM?`<div class="m">Menampilkan ${LIM} data terakhir dari ${g.recs.length}.</div><div class="row"><button class="b gray" onclick="rekAll=true;rekapView(${rk})">Tampilkan semua</button></div>`:''}${shown.map(r=>`<div class="item"><span><b>${E(un(g))} ${r.no}</b>${g.n>1?' · '+E(r._s.h.tgl):''} · ${E(summ(g,r))}</span><button class="b" onclick="go('edit','${(r._s||g).id}:${r.no}')">Koreksi</button></div>`).join('')||'<p class="m">Belum ada data.</p>'}</div>`);
 }
+const nextNo=s=>s.recs.reduce((m,r)=>Math.max(m,+r.no||0),0)+1,recBy=(s,no)=>s.recs.find(r=>r.no==no);
 function editView(a){
-  const [id,no]=a.split(':'),s=find(id),r=s.recs[no-1];
+  const [id,no]=a.split(':'),s=find(id),r=recBy(s,no);
   show('Koreksi '+un(s)+' '+no,title(s),`<div class="card"><div class="m">📍 ${(+r.lat).toFixed(6)}, ${(+r.lon).toFixed(6)}</div>${formHTML(s.def,r.d)}</div>`,
-  {back:1,bar:`<button class="b gray" onclick="history.back()">BATAL</button><button class="b" onclick="saveEdit('${s.id}',${no})">SIMPAN</button>`});
+  {back:1,bar:`<button class="b gray" onclick="history.back()">BATAL</button><button class="b" style="background:var(--r)" onclick="delRec('${s.id}',${no})">HAPUS ${E(un(s).toUpperCase())}</button><button class="b" onclick="saveEdit('${s.id}',${no})">SIMPAN</button>`});
   vis();
 }
 function saveEdit(id,no){
-  const s=find(id);s.recs[no-1].d=readForm(s.def);S('sessions',sessions);
+  const s=find(id);recBy(s,no).d=readForm(s.def);S('sessions',sessions);
+  history.back();
+}
+async function delRec(id,no){
+  const s=find(id);if(!s||!recBy(s,no))return;
+  if(!confirm(`HAPUS ${un(s).toUpperCase()} No. ${no}?\n\nData ${ul(s)} ini beserta fotonya akan dihapus permanen dan TIDAK BISA dikembalikan.\nNomor ${ul(s)} lain tidak berubah.`))return;
+  s.recs=s.recs.filter(r=>r.no!=no);S('sessions',sessions);
+  try{await pDel(s.id+'_'+no)}catch(e){logE('hapus','foto gagal dihapus: '+(e&&e.message||e))}
+  galData=galData.filter(x=>x.id!=s.id+'_'+no);
   history.back();
 }
 
@@ -459,7 +522,7 @@ async function shareXlsx(id){
 function histView(){
   show('','',`${tabs('map')}${subtabs('hist')}`+(sessions.length?sessions.map(s=>`<div class="card"><b>${E(title(s))}</b>
   <div class="m">${E(s.h.tgl)} · Blok ${E(s.h.blok)} · ${s.recs.length} ${ul(s)} · ${E(s.h.petugas)} · ${s.done?'Selesai':'Belum selesai'}</div>
-  <div class="row"><button class="b" onclick="rekG='${gKey(s)}';rekAll=false;subTab('rekap')">Rekap</button><button class="b gray" onclick="showOnMap(${s.id})">🗺 Peta</button>${s.done?'':`<button class="b" style="background:#f57c00" onclick="go('run',${s.id})">Lanjutkan</button>`}<button class="b" style="background:var(--r)" onclick="del(${s.id})">Hapus</button></div></div>`).join(''):'<p class="m">Belum ada data.</p>'));
+  <div class="row"><button class="b" onclick="lihat(${s.id})">Lihat</button><button class="b gray" onclick="showOnMap(${s.id})">🗺 Peta</button>${s.done?'':`<button class="b" style="background:#f57c00" onclick="go('run',${s.id})">Lanjutkan</button>`}<button class="b" style="background:var(--r)" onclick="del(${s.id})">Hapus</button></div></div>`).join(''):'<p class="m">Belum ada data.</p>'));
 }
 function showOnMap(id){sessions.forEach(s=>{mf.off[s.id]=s.id!=id});mf.jenis='';mf.by='jenis';mf.hide={};mv=null;subTab('map')}
 function del(id){
@@ -561,7 +624,11 @@ const mPut=r=>tx('maps','readwrite',s=>s.put(r)),mAll=()=>tx('maps','readonly',s
 /* ---------- Foto: ambil & watermark ---------- */
 const p2=n=>String(n).padStart(2,'0');
 const fmtDT=d=>`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
-const wmLines=(s,no,ket,t,g)=>[fmtDT(t),title(s),`Blok ${s.h.blok} · Baris ${s.h.baris} · Arah ${s.h.arah}`,`${un(s)} ke-${no}`,g&&g.lat!==''?`Koordinat: ${(+g.lat).toFixed(6)}, ${(+g.lon).toFixed(6)}`:'Koordinat: -',`Lux: ${g&&g.lux!==''&&g.lux!=null?g.lux:'-'}`].concat(g&&g.hdg!=null?['Arah hadap: '+g.hdg+'° '+card8(g.hdg)]:[]).concat(ket?['Ket: '+ket]:[]);
+const volLine=(s,vol)=>{
+  const pr=sessions.filter(x=>x!==s&&title(x)==title(s)&&nk(x.h.blok)==nk(s.h.blok)).reduce((a,x)=>a+x.recs.length,0);
+  return `Volume disensus: ${vol} ${ul(s)}`+(pr>0?` (total blok ${pr+vol})`:'');
+};
+const wmLines=(s,no,ket,t,g,vol)=>[fmtDT(t),title(s),`Blok ${s.h.blok} · Baris ${s.h.baris} · Arah ${s.h.arah}`,`${un(s)} ke-${no}`,volLine(s,vol==null?s.recs.length:vol),g&&g.lat!==''?`Koordinat: ${(+g.lat).toFixed(6)}, ${(+g.lon).toFixed(6)}`:'Koordinat: -',`Lux: ${g&&g.lux!==''&&g.lux!=null?g.lux:'-'}`].concat(g&&g.hdg!=null?['Arah hadap: '+g.hdg+'° '+card8(g.hdg)]:[]).concat(ket?['Ket: '+ket]:[]);
 function wm(base,lines){
   const c=document.createElement('canvas');c.width=base.width;c.height=base.height;
   const x=c.getContext('2d');x.drawImage(base,0,0);
@@ -596,7 +663,7 @@ async function ambilFoto(){
 let pvKey='';
 function pvUpdate(force){
   if(!draft)return;
-  const lines=wmLines(run,run.recs.length+1,$('#ket').value.trim(),draft.t,pg),key=lines.join('|');
+  const lines=wmLines(run,nextNo(run),$('#ket').value.trim(),draft.t,pg,run.recs.length+1),key=lines.join('|');
   if(!force&&key===pvKey)return;pvKey=key;
   const c=wm(draft.base,lines),pv=$('#pv');
   pv.width=c.width;pv.height=c.height;pv.getContext('2d').drawImage(c,0,0);pv.style.display='block';
@@ -677,8 +744,8 @@ async function shareData(ids){
     await plug('Share').share({title:name,files:[r.uri],dialogTitle:'Bagikan Data Tim'});
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Gagal membagikan data: '+(e&&e.message||e))}
 }
-function impData(){
-  pickFile('*/*',async f=>{
+function impData(){pickFile('*/*',impDataFile)}
+async function impDataFile(f){
     try{
       busy('Mengimpor data…');
       const d=JSON.parse(await f.text());
@@ -695,7 +762,6 @@ function impData(){
       busy();alert(`Impor selesai: ${add} sesi baru, ${upd} diperbarui, ${skip} dilewati (sudah ada), ${np} foto.`);
       if(view=='hist')histView();
     }catch(e){busy();alert('Gagal impor: '+(e&&e.message||e))}
-  });
 }
 
 /* ---------- GeoPDF: parser struktur PDF (ISO 32000) ---------- */
@@ -1086,15 +1152,16 @@ async function pdfToCanvas(){
   return c;
 }
 async function impMap(){
+  if(!PM())return alert('Impor peta hanya tersedia di aplikasi Android.');
+  busy('Membuka berkas…');
+  let f;try{f=await PM().pick()}catch(e){busy();return alert('Gagal membuka berkas: '+(e&&e.message||e))}
+  if(!f||f.cancelled){busy();return}
+  await impMapFile(f);
+}
+async function impMapFile(f){
   if(!window.L)return alert('Pustaka peta belum termuat.');
-  const N=PM();
-  if(!N)return alert('Impor peta hanya tersedia di aplikasi Android.');
-  let picked=false;
+  const N=PM(),picked=true;
   try{
-    busy('Membuka berkas…');
-    const f=await N.pick();
-    if(!f||f.cancelled){busy();return}
-    picked=true;
     const name=(f.name||'Peta').replace(/\.[^.]+$/,'')||'Peta';
     const isImg=/^image\//.test(f.mime||'')||/\.(jpe?g|png|webp|bmp)$/i.test(f.name||'');
     let rec=null;
@@ -1547,8 +1614,8 @@ async function doBackup(){
     await plug('Share').share({title:name,files:[r.uri],dialogTitle:'Simpan / kirim file backup'});
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Backup gagal: '+(e&&e.message||e))}
 }
-function doRestore(){
-  pickFile('*/*',async f=>{
+function doRestore(){pickFile('*/*',restoreFile)}
+async function restoreFile(f){
     if(!confirm(`Restore dari "${f.name}"?\nData di file akan DIGABUNGKAN ke aplikasi ini; data yang sudah ada tidak dihapus.`))return;
     const st={s:0,u:0,c:0,m:0,p:0};let meta=false;
     try{
@@ -1582,7 +1649,6 @@ function doRestore(){
       busy();alert(`Restore selesai: ${st.s} sesi baru, ${st.u} sesi diperbarui, ${st.c} sensus custom, ${st.m} peta, ${st.p} foto, ${st.l||0} layer.`);
       go('home',0,true);
     }catch(e){busy();alert('Restore gagal: '+((e instanceof SyntaxError)?'file rusak atau bukan backup Sensus Blok.':(e&&e.message||e)))}
-  });
 }
 
 /* ---------- Laporan WA: peta areal + kolase foto ---------- */
@@ -1624,6 +1690,13 @@ async function areaBlob(s){
     for(let gy=-H;gy<H*2;gy+=g*k){x.beginPath();x.moveTo(0,gy);x.lineTo(W,gy);x.stroke()}
     P=i=>[W/2+(m[i][0]-cx)*k,H/2-(m[i][1]-cy)*k];mpp=1/k;
   }
+  /* jejak tracking: garis menghubungkan titik sensus sesuai urutan jalan (per sesi) */
+  x.lineJoin='round';x.lineCap='round';
+  for(const [w,col] of [[9,'rgba(255,255,255,.95)'],[4,'#1565c0']]){
+    x.lineWidth=w;x.strokeStyle=col;x.beginPath();
+    pts.forEach((p,i)=>{const [px,py]=P(i);if(i>0&&pts[i-1].s===p.s){x.lineTo(px,py)}else x.moveTo(px,py)});
+    x.stroke();
+  }
   const lbl=pts.length<=80;
   x.textAlign='center';x.textBaseline='middle';
   pts.forEach((p,i)=>{
@@ -1633,7 +1706,7 @@ async function areaBlob(s){
   x.textAlign='left';
   x.fillStyle='rgba(0,0,0,.6)';x.fillRect(0,0,W,86);x.fillStyle='#fff';x.font='bold 32px sans-serif';
   x.fillText(`${title(s)} · Blok ${s.h.blok} · Baris ${s.h.baris}`,18,32);
-  x.font='22px sans-serif';x.fillStyle='#d6e2d3';x.fillText(`${s.h.tgl} · ${s.h.petugas} · ${s.recs.length} ${ul(s)}${M?' · '+M.name:''}`,18,66);
+  x.font='22px sans-serif';x.fillStyle='#d6e2d3';x.fillText(`Peta tracking · ${s.h.tgl} · ${s.h.petugas} · ${s.recs.length} ${ul(s)}${M?' · '+M.name:''}`,18,66);
   const leg=cz.leg.slice(0,10),lh=30,bh=leg.length*lh+54;
   if(leg.length){
     x.fillStyle='rgba(255,255,255,.88)';x.fillRect(14,H-bh-14,360,bh);x.fillStyle='#1b1f1a';x.font='bold 20px sans-serif';
@@ -1646,8 +1719,9 @@ async function areaBlob(s){
   x.fillStyle='#1b1f1a';x.font='bold 18px sans-serif';x.textAlign='center';x.fillText(fmtD(nl),W-30-bw/2,H-48);
   return cb(c,.88);
 }
-async function collageBlobs(s){
-  const MAXP=36,sidl=s.ids||[s.id],all=(await pAll()).filter(q=>sidl.includes(q.sid)).sort((a,b)=>sidl.indexOf(a.sid)-sidl.indexOf(b.sid)||a.no-b.no),ph=all.slice(0,MAXP);
+const samp=(a,k)=>a.length<=k?a:Array.from({length:k},(_,i)=>a[Math.round(i*(a.length-1)/Math.max(1,k-1))]);
+async function collageBlobs(s,MAXP){
+  MAXP=MAXP||36;const MAXP0=MAXP,sidl=s.ids||[s.id],all=(await pAll()).filter(q=>sidl.includes(q.sid)).sort((a,b)=>sidl.indexOf(a.sid)-sidl.indexOf(b.sid)||a.no-b.no),ph=samp(all,MAXP);
   if(!ph.length)return[];
   const out=[],PER=9,TW=560,TH=420,CAP=64,G=10,HD=84;
   for(let i0=0;i0<ph.length;i0+=PER){
@@ -1657,7 +1731,7 @@ async function collageBlobs(s){
     x.textBaseline='middle';x.textAlign='left';x.fillStyle='#fff';x.font='bold 28px sans-serif';
     x.fillText(`${title(s)} · Blok ${s.h.blok} · ${s.h.tgl}`,G*2,32);
     x.font='20px sans-serif';x.fillStyle='#b9c4b5';
-    x.fillText(`Foto ${i0+1}–${i0+n} dari ${all.length}${all.length>MAXP?` (maks ${MAXP})`:''} · ${s.h.petugas}`,G*2,62);
+    x.fillText(`${all.length>MAXP?`${n} foto sampel dari ${all.length}`:`Foto ${i0+1}–${i0+n} dari ${all.length}`} · ${s.h.petugas}`,G*2,62);
     for(let k=0;k<n;k++){
       const q=grp[k],cx=G+(k%cl)*(TW+G),cy=HD+G+Math.floor(k/cl)*(TH+CAP+G),u=URL.createObjectURL(q.blob);
       let im;try{im=await loadImg(u)}finally{URL.revokeObjectURL(u)}
@@ -1678,14 +1752,20 @@ async function collageBlobs(s){
 }
 async function shareReport(id){
   const s=find(id),FS=plug('Filesystem'),SH=plug('Share');
+  if(!s)return alert('Data tidak ditemukan.');
   if(!FS||!SH)return alert('Fitur ini hanya tersedia di aplikasi Android.');
   try{
+    const sidl=s.ids||[s.id],np=(await pAll()).filter(p=>sidl.includes(p.sid)).length;
+    let withPh=false;
+    if(np){const c=await pickOpt(`Lampiran laporan (${np} foto tersedia)`,['Peta tracking saja','Peta tracking + kolase maks 3 foto sampel']);if(c<0)return;withPh=c==1}
     const files=[],tag=`${slug(title(s))}_${slug(s.h.blok)}_${ftg(s)}`,save=async(b,n)=>{const r=await FS.writeFile({path:n,data:await toB64(b),directory:'CACHE'});files.push(r.uri)};
-    busy('Membuat gambar peta areal…');
-    const mb=await areaBlob(s);if(mb)await save(mb,`peta_${tag}.jpg`);
-    busy('Membuat kolase foto…');
-    const cols=await collageBlobs(s);
-    for(let i=0;i<cols.length;i++)await save(cols[i],`foto_${tag}_${i+1}.jpg`);
+    busy('Membuat peta tracking…');
+    const mb=await areaBlob(s);if(mb)await save(mb,`tracking_${tag}.jpg`);
+    if(withPh){
+      busy('Membuat kolase foto sampel…');
+      const cols=await collageBlobs(s,3);
+      for(let i=0;i<cols.length;i++)await save(cols[i],`foto_sampel_${tag}_${i+1}.jpg`);
+    }
     busy();
     if(!files.length)return shareTxt(id);
     await SH.share({title:'Laporan sensus',text:waText(s),files,dialogTitle:'Bagikan laporan'});
@@ -2060,8 +2140,8 @@ function pickFiles(accept,cb2){
   const i=document.createElement('input');i.type='file';i.multiple=true;i.accept=accept;i.style.display='none';
   i.onchange=()=>{const f=[...i.files];i.remove();if(f.length)cb2(f)};document.body.appendChild(i);i.click();
 }
-function impLayers(){
-  pickFiles('*/*',async files=>{
+function impLayers(){pickFiles('*/*',impLayerFiles)}
+async function impLayerFiles(files){
     try{
       busy('Membaca layer…');
       const res=await readLayerFiles(files),guess=['name','nama','blok','block','id','label','kode','code'];let n=0;
@@ -2073,7 +2153,6 @@ function impLayers(){
       if(view=='map')await mapView();else if(view=='settings')settingsView();
       alert(`${res.length} layer diimpor: ${res.map(r=>r.name+' ('+r.feats.length+' objek)').join(', ')}`);
     }catch(e){busy();alert('Impor layer gagal: '+(e&&e.message||e))}
-  });
 }
 function drawLayers(){
   if(!LM||!LLy)return;LLy.clearLayers();
@@ -2324,7 +2403,37 @@ async function mapTool(k){
   else{mapAfter=k=='calib'?calibMap:regeoref;go('map')}
 }
 /* ---------- Mulai (lanjutan) ---------- */
+/* ---------- Berkas dari aplikasi lain (WhatsApp: Buka dengan / Bagikan) ---------- */
+let openBusy=false;
+async function openedFile(){
+  const N=PM();if(!N||openBusy||view=='run')return;
+  let f;try{f=await N.takeOpened()}catch(e){return}
+  if(!f||!f.has)return;
+  openBusy=true;
+  try{
+    const nm=f.name||'berkas',ext=((nm.match(/\.([^.]+)$/)||[])[1]||'').toLowerCase(),mime=f.mime||'';
+    let kind=ext=='pdf'||mime=='application/pdf'?'pdf':/^image\//.test(mime)||/^(jpe?g|png|webp|bmp)$/.test(ext)?'img':ext=='sbk'?'sbk':ext=='json'?'json':'layer';
+    let blob=null;
+    if(kind=='layer'&&!/^(shp|zip|kmz|kml|gpx|geojson|csv|xml|dbf|prj|cpg)$/.test(ext)){   // ekstensi tidak dikenal: intip isi berkas
+      blob=await fileBlob(f.path);const h=await blob.slice(0,300).text();
+      if(h.includes('"t":"meta"'))kind='sbk';else if(h.includes('"app":"SensusBlok"'))kind='json';
+    }
+    const what={pdf:'peta GeoPDF',img:'gambar peta (georeferensi manual)',sbk:'backup Sensus Blok (digabungkan ke data saat ini)',json:'data tim Sensus Blok (digabungkan)',layer:'layer vektor GIS'}[kind];
+    if(!confirm(`Buka "${nm}" di Sensus Blok sebagai ${what}?`)){await N.clearOpened();return}
+    if(kind=='pdf'||kind=='img'){
+      const r=await N.adopt();
+      await impMapFile({path:r.path,name:nm,mime});
+    }else{
+      blob=blob||await fileBlob(f.path);
+      const file=new File([blob],nm,{type:mime});
+      if(kind=='sbk')await restoreFile(file);else if(kind=='json')await impDataFile(file);else await impLayerFiles([file]);
+      await N.clearOpened();
+    }
+  }catch(e){busy();alert('Gagal membuka berkas: '+(e&&e.message||e))}
+  finally{openBusy=false}
+}
 async function startup(){
+  try{const N=PM();if(N&&N.addListener)N.addListener('fileOpened',()=>openedFile());document.addEventListener('visibilitychange',()=>{if(!document.hidden)openedFile()});openedFile()}catch(e){logE('open',e&&e.message||e)}
   try{const N=SN();if(N)nativeInfo=await N.getInfo()}catch(e){logE('native',e&&e.message||e)}
   await crashCheck();
   bnUi();
