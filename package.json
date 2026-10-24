@@ -1,6 +1,6 @@
 {
   "name": "sensus-blok",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -9,8 +9,7 @@
     "@capacitor/filesystem": "^7.0.0",
     "@capacitor/geolocation": "^7.0.0",
     "@capacitor/share": "^7.0.0",
-    "leaflet": "1.9.4",
-    "pdfjs-dist": "4.10.38"
+    "leaflet": "1.9.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0"
