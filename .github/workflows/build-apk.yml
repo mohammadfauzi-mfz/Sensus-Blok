@@ -26,17 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Copy offline libraries (peta & PDF)
+      - name: Copy offline libraries (peta)
         run: |
           mkdir -p www/lib
           cp -r node_modules/leaflet/dist www/lib/leaflet
-          cp node_modules/pdfjs-dist/legacy/build/pdf.min.mjs www/lib/pdf.js || cp node_modules/pdfjs-dist/legacy/build/pdf.mjs www/lib/pdf.js
-          cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs www/lib/pdf.worker.js || cp node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs www/lib/pdf.worker.js
-          cp -r node_modules/pdfjs-dist/standard_fonts www/lib/standard_fonts
-          cp -r node_modules/pdfjs-dist/cmaps www/lib/cmaps
 
       - name: Tanamkan nama repository (untuk update otomatis di aplikasi)
-        run: sed -i "s#__REPO__#${{ github.repository }}#" www/index.html
+        run: sed -i "s#__REPO__#${{ github.repository }}#" www/app.js
 
       - name: Generate Android project
         run: |
@@ -117,8 +113,350 @@ jobs:
               public void onCreate(Bundle savedInstanceState) {
                   registerPlugin(LightSensorPlugin.class);
                   registerPlugin(SensusNativePlugin.class);
+                  registerPlugin(PdfMapPlugin.class);
                   SensusNativePlugin.installCrashHandler(this);
                   super.onCreate(savedInstanceState);
+              }
+          }
+          JAVAEOF
+          cat > $D/PdfMapPlugin.java <<'JAVAEOF'
+          package com.bimapalma.sensusblok;
+
+          import android.app.Activity;
+          import android.app.ActivityManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.database.Cursor;
+          import android.graphics.Bitmap;
+          import android.graphics.Color;
+          import android.graphics.Matrix;
+          import android.graphics.pdf.PdfRenderer;
+          import android.net.Uri;
+          import android.os.ParcelFileDescriptor;
+          import android.provider.OpenableColumns;
+          import android.util.Base64;
+          import androidx.activity.result.ActivityResult;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.ActivityCallback;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.io.ByteArrayOutputStream;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.ScheduledExecutorService;
+          import java.util.concurrent.TimeUnit;
+
+          /**
+           * Impor & render GeoPDF secara native (android.graphics.pdf.PdfRenderer) di thread latar sendiri,
+           * sehingga WebView / layar tidak macet (ANR). Semua operasi berjalan berurutan pada satu thread.
+           *
+           * src = "tmp" (berkas hasil pick) atau id peta (PDF asli yang disimpan untuk render tajam saat zoom).
+           */
+          @CapacitorPlugin(name = "PdfMap")
+          public class PdfMapPlugin extends Plugin {
+              private final ScheduledExecutorService ex = Executors.newSingleThreadScheduledExecutor();
+              private PdfRenderer rend;
+              private ParcelFileDescriptor pfd;
+              private String openKey = "";
+              private volatile long lastUse = 0;
+
+              private File dir() {
+                  File d = new File(getContext().getFilesDir(), "pdfmap");
+                  d.mkdirs();
+                  return d;
+              }
+
+              private static String clean(String s) {
+                  return s == null ? "x" : s.replaceAll("[^A-Za-z0-9_.-]", "_");
+              }
+
+              private File fileFor(String src) {
+                  return "tmp".equals(src) ? new File(dir(), "import.tmp") : new File(dir(), clean(src) + ".pdf");
+              }
+
+              private static String msg(Throwable t) {
+                  if (t instanceof OutOfMemoryError) return "Memori HP tidak cukup untuk memproses peta ini.";
+                  if (t instanceof SecurityException) return "PDF dilindungi password.";
+                  String m = t.getMessage();
+                  return (m == null || m.isEmpty()) ? t.toString() : m;
+              }
+
+              // Hanya dipanggil dari thread executor.
+              private PdfRenderer open(String src) throws Exception {
+                  if (rend != null && src.equals(openKey)) return rend;
+                  closeDoc();
+                  File f = fileFor(src);
+                  if (!f.exists()) throw new Exception("Berkas PDF peta tidak ditemukan di penyimpanan aplikasi.");
+                  pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+                  try {
+                      rend = new PdfRenderer(pfd);
+                  } catch (Exception e) {
+                      try { pfd.close(); } catch (Exception x) { }
+                      pfd = null;
+                      throw e;
+                  }
+                  openKey = src;
+                  return rend;
+              }
+
+              private void closeDoc() {
+                  try { if (rend != null) rend.close(); } catch (Exception e) { }
+                  try { if (pfd != null) pfd.close(); } catch (Exception e) { }
+                  rend = null;
+                  pfd = null;
+                  openKey = "";
+              }
+
+              private void touch() {
+                  lastUse = System.currentTimeMillis();
+                  ex.schedule(new Runnable() {
+                      @Override
+                      public void run() {
+                          if (System.currentTimeMillis() - lastUse >= 40000) closeDoc();
+                      }
+                  }, 45, TimeUnit.SECONDS);
+              }
+
+              @PluginMethod
+              public void pick(PluginCall call) {
+                  Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                  i.addCategory(Intent.CATEGORY_OPENABLE);
+                  i.setType("*/*");
+                  i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "image/*"});
+                  startActivityForResult(call, i, "pickDone");
+              }
+
+              @ActivityCallback
+              private void pickDone(final PluginCall call, ActivityResult result) {
+                  if (call == null) return;
+                  if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
+                      JSObject o = new JSObject();
+                      o.put("cancelled", true);
+                      call.resolve(o);
+                      return;
+                  }
+                  final Uri uri = result.getData().getData();
+                  final Context c = getContext();
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              closeDoc();
+                              String mime = c.getContentResolver().getType(uri);
+                              String name = "peta";
+                              Cursor q = null;
+                              try {
+                                  q = c.getContentResolver().query(uri, null, null, null, null);
+                                  if (q != null && q.moveToFirst()) {
+                                      int k = q.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                                      if (k >= 0 && q.getString(k) != null) name = q.getString(k);
+                                  }
+                              } finally {
+                                  if (q != null) q.close();
+                              }
+                              File out = fileFor("tmp");
+                              long n = 0;
+                              InputStream in = c.getContentResolver().openInputStream(uri);
+                              if (in == null) throw new Exception("Berkas tidak dapat dibuka.");
+                              OutputStream os = new FileOutputStream(out);
+                              try {
+                                  byte[] b = new byte[262144];
+                                  int k;
+                                  while ((k = in.read(b)) > 0) {
+                                      os.write(b, 0, k);
+                                      n += k;
+                                  }
+                              } finally {
+                                  try { os.close(); } catch (Exception e) { }
+                                  try { in.close(); } catch (Exception e) { }
+                              }
+                              JSObject o = new JSObject();
+                              o.put("path", out.getAbsolutePath());
+                              o.put("name", name);
+                              o.put("mime", mime == null ? "" : mime);
+                              o.put("size", n);
+                              call.resolve(o);
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              @PluginMethod
+              public void info(final PluginCall call) {
+                  final String src = call.getString("src", "tmp");
+                  final int pg = call.getInt("page", 0);
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              PdfRenderer r = open(src);
+                              int pages = r.getPageCount();
+                              PdfRenderer.Page p = r.openPage(Math.max(0, Math.min(pages - 1, pg)));
+                              JSObject o = new JSObject();
+                              try {
+                                  o.put("w", p.getWidth());
+                                  o.put("h", p.getHeight());
+                              } finally {
+                                  p.close();
+                              }
+                              o.put("pages", pages);
+                              touch();
+                              call.resolve(o);
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              /**
+               * Render wilayah (ox,oy,rw,rh) dari "viewport halaman pada skala kv" ke bitmap ow x oh.
+               * Bila "out" diisi hasil ditulis ke berkas JPEG (kembali: path), jika tidak kembali: data (base64 JPEG).
+               */
+              @PluginMethod
+              public void render(final PluginCall call) {
+                  final String src = call.getString("src", "tmp");
+                  final int pg = call.getInt("page", 0);
+                  final double kv = call.getDouble("kv", 1.0);
+                  final double ox = call.getDouble("ox", 0.0);
+                  final double oy = call.getDouble("oy", 0.0);
+                  final double rw = call.getDouble("rw", 1.0);
+                  final double rh = call.getDouble("rh", 1.0);
+                  final int ow = call.getInt("ow", 512);
+                  final int oh = call.getInt("oh", 512);
+                  final int q = call.getInt("q", 85);
+                  final String out = call.getString("out");
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          Bitmap bmp = null;
+                          try {
+                              if (ow < 1 || oh < 1 || ow > 8192 || oh > 8192 || rw <= 0 || rh <= 0 || kv <= 0)
+                                  throw new Exception("Ukuran render tidak valid.");
+                              PdfRenderer r = open(src);
+                              bmp = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888);
+                              bmp.eraseColor(Color.WHITE);
+                              Matrix m = new Matrix();
+                              m.setScale((float) (kv * ow / rw), (float) (kv * oh / rh));
+                              m.postTranslate((float) (-ox * ow / rw), (float) (-oy * oh / rh));
+                              PdfRenderer.Page p = r.openPage(Math.max(0, Math.min(r.getPageCount() - 1, pg)));
+                              try {
+                                  p.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                              } finally {
+                                  p.close();
+                              }
+                              JSObject o = new JSObject();
+                              o.put("w", ow);
+                              o.put("h", oh);
+                              if (out != null && !out.isEmpty()) {
+                                  File f = new File(dir(), clean(out));
+                                  FileOutputStream fo = new FileOutputStream(f);
+                                  try {
+                                      bmp.compress(Bitmap.CompressFormat.JPEG, q, fo);
+                                  } finally {
+                                      fo.close();
+                                  }
+                                  o.put("path", f.getAbsolutePath());
+                              } else {
+                                  ByteArrayOutputStream bo = new ByteArrayOutputStream(65536);
+                                  bmp.compress(Bitmap.CompressFormat.JPEG, q, bo);
+                                  o.put("data", Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP));
+                              }
+                              touch();
+                              call.resolve(o);
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          } finally {
+                              if (bmp != null) bmp.recycle();
+                          }
+                      }
+                  });
+              }
+
+              /** Simpan PDF hasil pick sebagai PDF peta (untuk render tajam saat zoom). */
+              @PluginMethod
+              public void save(final PluginCall call) {
+                  final String id = call.getString("id", "peta");
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              closeDoc();
+                              File t = fileFor("tmp"), d = fileFor(id);
+                              if (d.exists()) d.delete();
+                              if (!t.renameTo(d)) throw new Exception("Gagal menyimpan PDF peta.");
+                              call.resolve();
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              @PluginMethod
+              public void remove(final PluginCall call) {
+                  final String id = call.getString("id", "");
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              if (id.length() > 0) {
+                                  if (id.equals(openKey)) closeDoc();
+                                  fileFor(id).delete();
+                              }
+                              call.resolve();
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              /** Hapus berkas sementara (hasil pick & gambar sementara). */
+              @PluginMethod
+              public void cleanup(final PluginCall call) {
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              if ("tmp".equals(openKey)) closeDoc();
+                              File[] fs = dir().listFiles();
+                              if (fs != null) for (File f : fs) {
+                                  String n = f.getName();
+                                  if (n.equals("import.tmp") || n.startsWith("base_") || n.startsWith("page_")) f.delete();
+                              }
+                              call.resolve();
+                          } catch (Throwable t) {
+                              call.reject(msg(t));
+                          }
+                      }
+                  });
+              }
+
+              @PluginMethod
+              public void memInfo(PluginCall call) {
+                  ActivityManager am = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+                  JSObject o = new JSObject();
+                  o.put("memClass", am.getMemoryClass());
+                  o.put("lowRam", am.isLowRamDevice());
+                  call.resolve(o);
+              }
+
+              @Override
+              protected void handleOnDestroy() {
+                  ex.execute(new Runnable() {
+                      @Override
+                      public void run() {
+                          closeDoc();
+                      }
+                  });
               }
           }
           JAVAEOF
@@ -436,7 +774,7 @@ jobs:
           }
           EOF
           echo "apply from: 'signing.gradle'" >> android/app/build.gradle
-          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.9"/' android/app/build.gradle
+          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "2.0"/' android/app/build.gradle
 
       - name: Build debug APK
         run: |
@@ -458,7 +796,7 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: Sensus Blok build ${{ github.run_number }} (v1.9)
+          name: Sensus Blok build ${{ github.run_number }} (v2.0)
           body: ${{ github.event.head_commit.message || 'Pembaruan aplikasi' }}
           files: SensusBlok-build${{ github.run_number }}.apk
           make_latest: true
