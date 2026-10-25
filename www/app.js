@@ -699,14 +699,47 @@ function galGrid(){
   $('#gg').innerHTML=list.map((p,i)=>`<div class="cell" onclick="go('photo','${p.id}')"><img data-i="${i}" alt=""><div class="cap"><b>Blok ${E(p.blok)} · ${E(p.unit||'Pokok')} ${p.no}</b><br>${E(p.jenis)}<br>${E(p.tgl)}</div></div>`).join('')||'<p class="m">Belum ada foto.</p>';
   document.querySelectorAll('#gg img').forEach(im=>{const u=URL.createObjectURL(list[im.dataset.i].th);gU.push(u);im.src=u});
 }
+/* zoom foto: cubit 2 jari, geser saat diperbesar, ketuk 2× untuk perbesar/kecilkan */
+function pinchZoom(box,img){
+  let s=1,x=0,y=0,d0=0,s0=1,last=0;const P=new Map();
+  const ap=()=>{
+    s=Math.min(6,Math.max(1,s));
+    const mx=box.clientWidth*(s-1),my=box.clientHeight*(s-1);
+    x=Math.min(0,Math.max(-mx,x));y=Math.min(0,Math.max(-my,y));
+    if(s==1){x=0;y=0}
+    img.style.transform=`translate(${x}px,${y}px) scale(${s})`;
+  };
+  const zoomAt=(cx,cy,ns)=>{ns=Math.min(6,Math.max(1,ns));x=cx-(cx-x)*ns/s;y=cy-(cy-y)*ns/s;s=ns;ap()};
+  box.addEventListener('pointerdown',e=>{
+    try{box.setPointerCapture(e.pointerId)}catch(_){}
+    P.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(P.size==2){const [a,b]=[...P.values()];d0=Math.hypot(a.x-b.x,a.y-b.y);s0=s}
+    else if(P.size==1){
+      const t=Date.now();
+      if(t-last<300){const r=box.getBoundingClientRect();zoomAt(e.clientX-r.left,e.clientY-r.top,s>1.2?1:2.5)}
+      last=t;
+    }
+  });
+  box.addEventListener('pointermove',e=>{
+    const p=P.get(e.pointerId);if(!p)return;
+    const r=box.getBoundingClientRect(),dx=e.clientX-p.x,dy=e.clientY-p.y;
+    p.x=e.clientX;p.y=e.clientY;
+    if(P.size==2){
+      const [a,b]=[...P.values()],d=Math.hypot(a.x-b.x,a.y-b.y);
+      if(d0>0)zoomAt((a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top,s0*d/d0);
+    }else if(s>1){x+=dx;y+=dy;ap()}
+  });
+  const up=e=>{P.delete(e.pointerId);d0=0;if(P.size==1){s0=s}};
+  box.addEventListener('pointerup',up);box.addEventListener('pointercancel',up);
+}
 async function photoView(id){
   if(!galData.length)try{galData=await pAll()}catch(e){}
   const p=galData.find(x=>x.id==id);
   if(!p){alert('Foto tidak ditemukan.');history.back();return}
-  show('Foto '+(p.unit||'Pokok')+' '+p.no,`Blok ${p.blok}`,`<div class="card"><img id="pimg" alt="" style="width:100%;border-radius:8px">
+  show('Foto '+(p.unit||'Pokok')+' '+p.no,`Blok ${p.blok}`,`<div class="card"><div id="pbox" style="overflow:hidden;border-radius:8px;touch-action:none;background:#000"><img id="pimg" alt="" style="width:100%;display:block;transform-origin:0 0"></div><div class="m" style="font-size:12px">Cubit untuk zoom · ketuk 2× untuk perbesar/kecilkan</div>
   <div class="m" style="margin-top:8px">${E(p.jenis)}\nTanggal: ${E(p.tgl)} · ${E(fmtDT(new Date(p.t)))}\nEstate ${E(p.estate)} · Afdeling ${E(p.afd)} · Blok ${E(p.blok)}\nBaris ${E(p.baris)} · Arah ${E(p.arah)} · ${E(p.unit||'Pokok')} ${p.no}\nPetugas: ${E(p.petugas)}${p.ket?'\nKet: '+E(p.ket):''}</div>
   <div class="row"><button class="b" onclick="sharePhoto('${p.id}')">Share</button><button class="b" style="background:var(--r)" onclick="delPhoto('${p.id}')">Hapus</button></div></div>`,{back:1});
-  const u=URL.createObjectURL(p.blob);gU.push(u);$('#pimg').src=u;
+  const u=URL.createObjectURL(p.blob);gU.push(u);$('#pimg').src=u;pinchZoom($('#pbox'),$('#pimg'));
 }
 async function sharePhoto(id){
   const p=galData.find(x=>x.id==id);

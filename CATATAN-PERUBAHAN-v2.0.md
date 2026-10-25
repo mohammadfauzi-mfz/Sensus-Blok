@@ -58,3 +58,6 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
 
 ## Tahap 6
 - Kolase foto sampel di laporan: maks 4 foto (tata letak 2×2, tidak ada ruang kosong).
+
+## Tahap 7
+- Tampilan foto (Galeri): zoom dengan cubit 2 jari (1x–6x), geser saat diperbesar, ketuk 2x untuk perbesar/kecilkan.
