@@ -1778,13 +1778,13 @@ async function shareReport(id){
   try{
     const sidl=s.ids||[s.id],np=(await pAll()).filter(p=>sidl.includes(p.sid)).length;
     let withPh=false;
-    if(np){const c=await pickOpt(`Lampiran laporan (${np} foto tersedia)`,['Peta tracking saja','Peta tracking + kolase maks 3 foto sampel (1 gambar)']);if(c<0)return;withPh=c==1}
+    if(np){const c=await pickOpt(`Lampiran laporan (${np} foto tersedia)`,['Peta tracking saja','Peta tracking + kolase maks 4 foto sampel (1 gambar)']);if(c<0)return;withPh=c==1}
     const files=[],tag=`${slug(title(s))}_${slug(s.h.blok)}_${ftg(s)}`,save=async(b,n)=>{const r=await FS.writeFile({path:n,data:await toB64(b),directory:'CACHE'});files.push(r.uri)};
     busy('Membuat peta tracking…');
     const mb=await areaBlob(s);
     if(withPh){
       busy('Membuat kolase foto sampel…');
-      const cols=await collageBlobs(s,3);
+      const cols=await collageBlobs(s,4);
       /* satu gambar saja (peta di atas, kolase di bawah): WhatsApp tidak andal menerima beberapa gambar + teks sekaligus */
       const one=await stackBlobs([mb,...cols].filter(Boolean));
       if(one)await save(one,`laporan_${tag}.jpg`);

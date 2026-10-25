@@ -55,3 +55,6 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
 ## Tahap 5
 - Laporan dengan kolase kini dikirim sebagai SATU gambar (peta tracking di atas, kolase foto sampel di
   bawah) + teks, karena WhatsApp gagal menerima 2 gambar sekaligus dengan teks. Tanpa kolase tetap 1 gambar peta.
+
+## Tahap 6
+- Kolase foto sampel di laporan: maks 4 foto (tata letak 2×2, tidak ada ruang kosong).
