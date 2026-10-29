@@ -325,6 +325,7 @@ function rekapView(key){
   <div class="m" style="margin-top:4px"><b>Volume disensus: ${g.recs.length} ${E(ul(g))}</b></div><div class="m">${E(hinfo(g))}</div>
   <table>${rekapLines(g).map(([l,v])=>v===''?`<tr><td colspan="2"><b>${E(l)}</b></td></tr>`:`<tr><td>${E(l)}</td><td class="r">${E(v)}</td></tr>`).join('')}</table></div>
   <div class="card"><div class="row" style="margin-top:0"><button class="b" onclick="shareXlsx(${q})">📊 Share Excel + Foto (WA)</button></div>
+  <div class="row"><button class="b" style="background:#1565c0" onclick="uploadSheet(${q})">☁️ Upload ke Spreadsheet (tanpa foto)</button></div>
   <div class="row"><button class="b" onclick="shareReport(${q})">📤 Share Laporan + Peta Tracking (WA)</button></div>
   <div class="row"><button class="b gray" onclick="shareTxt(${q})">Share Rekap (WA Text)</button><button class="b" onclick="shareCSV(${q})">Share CSV (WA)</button></div>
   <div class="row"><button class="b gray" onclick="shareData(${JSON.stringify(g.ids||[g.id])})">Share Data Tim (.json)</button><button class="b gray" onclick="exportDlg('s'+${q})">🗺 Export GIS</button></div></div>
@@ -516,6 +517,66 @@ async function shareXlsx(id){
     busy();
     await sendFiles([uri],waText(s)+(failed.length?`\n(Foto ${failed.join(', ')} tidak dapat disisipkan)`:''),'Bagikan Excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }catch(e){busy();if(!/cancel/i.test(e&&e.message||''))alert('Gagal membuat Excel: '+(e&&e.message||e))}
+}
+
+/* ---------- Upload ke Google Sheets (Apps Script): folder "sensus" > file per estate > tab per jenis sensus ---------- */
+function gsSave(){const u=($('#gsu')||{}).value,k=($('#gsk')||{}).value;if(u!==undefined)S('gs',{url:u.trim(),key:(k||'').trim()})}
+async function gsCall(cfg,body){
+  let res;const H={'Content-Type':'text/plain;charset=utf-8'},CH=plug('CapacitorHttp');
+  if(body){
+    const data=JSON.stringify(body);
+    if(CH&&CH.request){const r=await CH.request({url:cfg.url,method:'POST',headers:H,data,connectTimeout:30000,readTimeout:180000});res=r.data}
+    else{const r=await fetch(cfg.url,{method:'POST',headers:H,body:data});res=await r.text()}
+  }else{
+    const u=cfg.url+(cfg.url.includes('?')?'&':'?')+'key='+encodeURIComponent(cfg.key);
+    if(CH&&CH.request){const r=await CH.request({url:u,method:'GET',connectTimeout:30000,readTimeout:60000});res=r.data}
+    else{const r=await fetch(u);res=await r.text()}
+  }
+  if(typeof res=='string'){try{res=JSON.parse(res)}catch(e){throw new Error('Balasan server tidak dikenali. Periksa URL (/exec) dan pengaturan deployment: akses "Siapa saja".')}}
+  return res||{};
+}
+async function gsTest(){
+  gsSave();const cfg=LS('gs',null),el=$('#gsS');
+  if(!cfg||!cfg.url||!cfg.key){if(el)el.textContent='Isi URL dan kunci dulu.';return}
+  if(el)el.textContent='Menguji koneksi…';
+  try{
+    const r=await gsCall(cfg);
+    if(el)el.innerHTML=r.ok?`<b style="color:var(--g)">✔ Terhubung.</b> Folder "${E(r.folder||'sensus')}" ${r.folderAda?'sudah ada':'akan dibuat saat upload pertama'}.`:`<b style="color:var(--r)">✘ ${E(r.error||'Gagal')}</b>`;
+  }catch(e){if(el)el.innerHTML=`<b style="color:var(--r)">✘ ${E(e&&e.message||e)}</b>`}
+}
+async function uploadSheet(id){
+  const s=find(id);if(!s)return alert('Data tidak ditemukan.');
+  const cfg=LS('gs',null);
+  if(!cfg||!cfg.url||!cfg.key)return alert('Isi dulu URL dan kunci di Pengaturan → Umum → Upload ke Spreadsheet.');
+  const T=tabOf(s),p2=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  const by=new Map();let noEst=0;
+  s.recs.forEach((r,i)=>{
+    const ss=(r._s||s),est=String(ss.h.estate||'').trim();
+    if(!est){noEst++;return}
+    const k=nk(est).replace(/\s/g,'');if(!by.has(k))by.set(k,{est,rows:[]});
+    const row=T.rows[i].slice();row[14]=iso(new Date(r.t));
+    by.get(k).rows.push([`${ss.id}_${r.no}`,...row]);
+  });
+  if(noEst)return alert(`${noEst} data tidak punya nama estate, jadi tidak bisa ditentukan file tujuannya. Lengkapi estate pada data/sesi lalu coba lagi.`);
+  const tot=[...by.values()].reduce((a,x)=>a+x.rows.length,0);
+  if(!confirm(`Upload ${tot} data "${title(s)}" ke Google Sheets?\n\n${[...by.values()].map(x=>`• File "${x.est}": ${x.rows.length} data`).join('\n')}\n\nFolder "sensus", tab "${title(s)}". Foto tidak diupload. Data yang sudah pernah diupload akan diperbarui, tidak dobel.`))return;
+  const headers=['ID',...T.cols],CH=400,res=[];let sent=0;
+  try{
+    for(const g of by.values()){
+      let baru=0,upd=0,tab='',nama=g.est;
+      for(let i=0;i<g.rows.length;i+=CH){
+        busy(`Mengunggah ${sent} dari ${tot}…`);
+        const r=await gsCall(cfg,{key:cfg.key,estate:g.est,jenis:title(s),headers,rows:g.rows.slice(i,i+CH)});
+        if(!r.ok)throw new Error(r.error||'Server menolak data.');
+        baru+=r.baru||0;upd+=r.diperbarui||0;tab=r.tab||tab;nama=r.estate||nama;sent+=Math.min(CH,g.rows.length-i);
+      }
+      res.push(`✔ ${nama} › ${tab}: ${baru} baru, ${upd} diperbarui`);
+    }
+    busy();alert(`Upload selesai (${tot} data).\n\n${res.join('\n')}`);
+  }catch(e){
+    busy();logE('upload',e&&e.message||e);
+    alert(`Upload terhenti: ${e&&e.message||e}\n\n${sent} dari ${tot} data sudah terkirim${res.length?'\n'+res.join('\n'):''}.\nAman diulang: data yang sama tidak akan dobel.`);
+  }
 }
 
 /* kirim berkas lewat Intent native (lampiran WhatsApp pasti ikut); cadangan: plugin Share */
@@ -2413,6 +2474,12 @@ async function settingsView(sub){
   if(setSub=='umum')h=`
   <div class="card"><b>🏢 Perusahaan</b><label>Nama perusahaan (tampil di header dan laporan)</label><input id="pt" value="${E(PT())}"><div class="row"><button class="b" onclick="ptSave()">Simpan</button></div></div>
   <div class="card"><b>🧭 Kompas</b><label>Deklinasi magnetik (°, positif = timur). Indonesia sekitar −1° hingga +2°</label><input id="dc" type="number" step="0.1" value="${E(LS('decl',0))}"><div class="row"><button class="b gray" onclick="declSave()">Simpan deklinasi</button></div></div>
+  <div class="card"><b>☁️ Upload ke Spreadsheet</b>
+  <div class="m" style="margin-top:4px">Google Drive: folder "sensus" → 1 file per estate → 1 tab per jenis sensus. Foto tidak diupload. Petunjuk pemasangan: folder apps-script di proyek.</div>
+  <label>URL aplikasi web Apps Script (berakhiran /exec)</label><input id="gsu" value="${E((LS('gs',null)||{}).url||'')}" placeholder="https://script.google.com/macros/s/…/exec">
+  <label>Kunci rahasia (sama dengan KUNCI di skrip)</label><input id="gsk" type="password" value="${E((LS('gs',null)||{}).key||'')}" placeholder="kunci rahasia">
+  <div class="row"><button class="b gray" onclick="gsTest()">Tes koneksi</button><button class="b" onclick="gsSave();alert('Tersimpan.')">Simpan</button></div>
+  <div id="gsS" class="m"></div></div>
   <div class="card"><b>⬇ Update aplikasi</b>
   <div class="m" style="margin-top:4px">Versi terpasang: ${APPV}${ni.versionCode?` · build ${ni.versionCode}`:''}</div>
   <div id="updS" class="m">${updInfo&&updInfo.newer?`<b>🔔 Versi baru tersedia: build ${updInfo.n}</b>`:''}</div>

@@ -61,3 +61,10 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
 
 ## Tahap 7
 - Tampilan foto (Galeri): zoom dengan cubit 2 jari (1x–6x), geser saat diperbesar, ketuk 2x untuk perbesar/kecilkan.
+
+## Tahap 8 — Upload ke Google Sheets (manual, tanpa foto)
+- Folder `apps-script/`: `Code.gs` (penerima) + `PETUNJUK.md` (cara pasang). Struktur Drive: folder "sensus" ->
+  1 file per estate -> 1 tab per jenis sensus. Kolom A = ID unik pokok, upload ulang memperbarui baris (tidak dobel).
+  File dibuat di Drive pemilik skrip dan tidak dibagikan; URL penerima dilindungi kunci rahasia.
+- Aplikasi: Pengaturan -> Umum -> "Upload ke Spreadsheet" (URL + kunci + Tes koneksi); tombol
+  "Upload ke Spreadsheet" di halaman Rekap / Lihat. Dikirim per estate, per 400 baris, dengan progres.
