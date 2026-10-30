@@ -34,6 +34,20 @@ jobs:
       - name: Tanamkan nama repository (untuk update otomatis di aplikasi)
         run: sed -i "s#__REPO__#${{ github.repository }}#" www/app.js
 
+      - name: Tanamkan URL & kunci Apps Script (GitHub Secrets GS_URL, GS_KEY; boleh kosong)
+        env:
+          GS_URL: ${{ secrets.GS_URL }}
+          GS_KEY: ${{ secrets.GS_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          p = 'www/app.js'
+          s = open(p, encoding='utf-8').read()
+          s = s.replace('__GS_URL__', os.environ.get('GS_URL', '').strip().replace("'", ''))
+          s = s.replace('__GS_KEY__', os.environ.get('GS_KEY', '').strip().replace("'", ''))
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+
       - name: Generate Android project
         run: |
           npx cap add android
