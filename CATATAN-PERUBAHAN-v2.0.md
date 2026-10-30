@@ -68,3 +68,12 @@ meng-encode JPEG ratusan kali, lalu menulis semuanya ke IndexedDB. Selama itu la
   File dibuat di Drive pemilik skrip dan tidak dibagikan; URL penerima dilindungi kunci rahasia.
 - Aplikasi: Pengaturan -> Umum -> "Upload ke Spreadsheet" (URL + kunci + Tes koneksi); tombol
   "Upload ke Spreadsheet" di halaman Rekap / Lihat. Dikirim per estate, per 400 baris, dengan progres.
+
+## Tahap 9 — URL & kunci upload tertanam + halaman admin tersembunyi
+- Workflow menyisipkan GitHub Secrets `GS_URL` dan `GS_KEY` ke aplikasi saat build (boleh kosong).
+- Kartu "Upload ke Spreadsheet" dihapus dari Pengaturan Umum. Akses admin: About -> ketuk nama
+  "Mohammad Fauzi" 5x (jeda maks. 3 detik) -> halaman Pengaturan Upload (ubah URL/kunci, tes koneksi,
+  kembalikan ke bawaan). Pengguna biasa hanya melihat tombol Upload di Rekap.
+
+## Tahap 10
+- URL Apps Script dan kunci diisikan sebagai bawaan di app.js (GS_URL_B / GS_KEY_B); secret GS_URL/GS_KEY (bila ada) menimpa.

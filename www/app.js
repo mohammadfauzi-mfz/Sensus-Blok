@@ -74,7 +74,7 @@ function go(v,a,np){
   if(!np){stk.push([view,va]);history.pushState({},'')}
   if(LM&&v!='map'){try{LM.remove()}catch(e){}LM=null;userL=null;LMm=null;LLy=null}
   view=v;va=a;
-  ({home,run:runPage,rekap:rekapView,hist:histView,custom:customView,about:aboutView,edit:editView,gal:galView,photo:photoView,map:mapView,settings:settingsView})[v](a);
+  ({home,run:runPage,rekap:rekapView,hist:histView,custom:customView,about:aboutView,gsadmin:gsAdminView,edit:editView,gal:galView,photo:photoView,map:mapView,settings:settingsView})[v](a);
 }
 onpopstate=()=>{
   if(!stk.length)return;
@@ -520,7 +520,28 @@ async function shareXlsx(id){
 }
 
 /* ---------- Upload ke Google Sheets (Apps Script): folder "sensus" > file per estate > tab per jenis sensus ---------- */
-function gsSave(){const u=($('#gsu')||{}).value,k=($('#gsk')||{}).value;if(u!==undefined)S('gs',{url:u.trim(),key:(k||'').trim()})}
+/* URL & kunci bawaan ditanam saat build (GitHub Secrets GS_URL / GS_KEY); admin dapat menimpanya di HP ini */
+const GS_URL0='__GS_URL__',GS_KEY0='__GS_KEY__';
+const GS_URL_B='https://script.google.com/macros/s/AKfycbyJudxKAGcoDxVwCzCdEhV2EBYJsTvAMCPdtmZBiVWwxJJSAarGQWuc1NAPJoECWoyszA/exec',GS_KEY_B='dsntbk@2026';   // bawaan bila secret build kosong
+const gsDef=()=>({url:GS_URL0&&!/^__/.test(GS_URL0)?GS_URL0:GS_URL_B,key:GS_KEY0&&!/^__/.test(GS_KEY0)?GS_KEY0:GS_KEY_B});
+function gsCfg(){const o=LS('gs',null)||{},d=gsDef();return{url:(o.url||d.url||'').trim(),key:(o.key||d.key||'').trim()}}
+function gsSave(){
+  const u=($('#gsu')||{}).value,k=($('#gsk')||{}).value;if(u===undefined)return;
+  const d=gsDef(),url=u.trim(),key=(k||'').trim();
+  if(url==d.url&&key==d.key)localStorage.removeItem('gs');else S('gs',{url,key});
+}
+function gsReset(){if(!confirm('Kembalikan URL dan kunci ke bawaan aplikasi?'))return;localStorage.removeItem('gs');gsAdminView()}
+function gsAdminView(){
+  const o=LS('gs',null)||{},c=gsCfg(),d=gsDef();
+  show('Pengaturan Upload','',`
+  <div class="card"><b>☁️ Upload ke Spreadsheet (admin)</b>
+  <div class="m" style="margin-top:4px">Sumber saat ini: ${o.url||o.key?'diubah manual di HP ini':(d.url?'bawaan aplikasi':'belum diatur')}</div>
+  <label>URL aplikasi web Apps Script (berakhiran /exec)</label><input id="gsu" value="${E(c.url)}" placeholder="https://script.google.com/macros/s/…/exec">
+  <label>Kunci rahasia (sama dengan KUNCI di skrip)</label><input id="gsk" type="password" value="${E(c.key)}" placeholder="kunci rahasia">
+  <div class="row"><button class="b gray" onclick="gsTest()">Tes koneksi</button><button class="b" onclick="gsSave();alert('Tersimpan.')">Simpan</button></div>
+  <div class="row"><button class="b gray" onclick="gsReset()">Kembalikan ke bawaan aplikasi</button></div>
+  <div id="gsS" class="m"></div></div>`);
+}
 async function gsCall(cfg,body){
   let res;const H={'Content-Type':'text/plain;charset=utf-8'},CH=plug('CapacitorHttp');
   if(body){
@@ -536,7 +557,7 @@ async function gsCall(cfg,body){
   return res||{};
 }
 async function gsTest(){
-  gsSave();const cfg=LS('gs',null),el=$('#gsS');
+  gsSave();const cfg=gsCfg(),el=$('#gsS');
   if(!cfg||!cfg.url||!cfg.key){if(el)el.textContent='Isi URL dan kunci dulu.';return}
   if(el)el.textContent='Menguji koneksi…';
   try{
@@ -546,8 +567,8 @@ async function gsTest(){
 }
 async function uploadSheet(id){
   const s=find(id);if(!s)return alert('Data tidak ditemukan.');
-  const cfg=LS('gs',null);
-  if(!cfg||!cfg.url||!cfg.key)return alert('Isi dulu URL dan kunci di Pengaturan → Umum → Upload ke Spreadsheet.');
+  const cfg=gsCfg();
+  if(!cfg.url||!cfg.key)return alert('Upload ke spreadsheet belum dikonfigurasi di aplikasi ini. Hubungi admin.');
   const T=tabOf(s),p2=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
   const by=new Map();let noEst=0;
   s.recs.forEach((r,i)=>{
@@ -640,10 +661,15 @@ function delCustom(id){
 }
 
 /* ---------- About ---------- */
+let cbN=0,cbT=0;
+function cbTap(){   // akses tersembunyi: ketuk nama 5x dalam 3 detik -> halaman pengaturan upload (admin)
+  const t=Date.now();if(t-cbT>3000)cbN=0;cbT=t;
+  if(++cbN>=5){cbN=0;try{fb()}catch(e){}go('gsadmin',0)}
+}
 function aboutView(){
   show('About Application','',`
   <div class="card center" style="padding:32px 16px">
-    <h2>Create By Mohammad Fauzi</h2>
+    <h2>Create By <span id="cb" onclick="cbTap()" style="-webkit-user-select:none;user-select:none">Mohammad Fauzi</span></h2>
     <p>Contact Me for Suggestion &amp; Feedback</p>
     <a href="https://wa.me/6285252390543" aria-label="WhatsApp">
       <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#25D366"/><path d="M32 11C20.4 11 11 20.4 11 32c0 3.8 1 7.3 2.8 10.4L11 53l10.9-2.8A20.9 20.9 0 0 0 32 53c11.6 0 21-9.4 21-21S43.6 11 32 11z" fill="none" stroke="#fff" stroke-width="3"/><path d="M24 22c-1 3 1 8 6 12s9 6 12 5l2-4-5-3-3 2c-2-1-5-3-6-6l2-3-3-5z" fill="#fff"/></svg>
@@ -2474,12 +2500,6 @@ async function settingsView(sub){
   if(setSub=='umum')h=`
   <div class="card"><b>🏢 Perusahaan</b><label>Nama perusahaan (tampil di header dan laporan)</label><input id="pt" value="${E(PT())}"><div class="row"><button class="b" onclick="ptSave()">Simpan</button></div></div>
   <div class="card"><b>🧭 Kompas</b><label>Deklinasi magnetik (°, positif = timur). Indonesia sekitar −1° hingga +2°</label><input id="dc" type="number" step="0.1" value="${E(LS('decl',0))}"><div class="row"><button class="b gray" onclick="declSave()">Simpan deklinasi</button></div></div>
-  <div class="card"><b>☁️ Upload ke Spreadsheet</b>
-  <div class="m" style="margin-top:4px">Google Drive: folder "sensus" → 1 file per estate → 1 tab per jenis sensus. Foto tidak diupload. Petunjuk pemasangan: folder apps-script di proyek.</div>
-  <label>URL aplikasi web Apps Script (berakhiran /exec)</label><input id="gsu" value="${E((LS('gs',null)||{}).url||'')}" placeholder="https://script.google.com/macros/s/…/exec">
-  <label>Kunci rahasia (sama dengan KUNCI di skrip)</label><input id="gsk" type="password" value="${E((LS('gs',null)||{}).key||'')}" placeholder="kunci rahasia">
-  <div class="row"><button class="b gray" onclick="gsTest()">Tes koneksi</button><button class="b" onclick="gsSave();alert('Tersimpan.')">Simpan</button></div>
-  <div id="gsS" class="m"></div></div>
   <div class="card"><b>⬇ Update aplikasi</b>
   <div class="m" style="margin-top:4px">Versi terpasang: ${APPV}${ni.versionCode?` · build ${ni.versionCode}`:''}</div>
   <div id="updS" class="m">${updInfo&&updInfo.newer?`<b>🔔 Versi baru tersedia: build ${updInfo.n}</b>`:''}</div>
